@@ -1,0 +1,401 @@
+---
+title: "Thalamus divisions CCEP comparison"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+require(knitr)
+require(plyr)
+library(dplyr)
+library(stringr)
+library(ggplot2)
+library(hrbrthemes)
+library(viridisLite)
+require(reshape2)
+library(tidyr)
+library(gmodels)
+library(fmsb)
+library(RColorBrewer)
+library(ggpubr)
+library(vtable)
+library(grid)
+library(kableExtra)
+library(factoextra)
+library(pracma)
+library(lme4)
+
+opts_chunk$set(echo = FALSE, message=FALSE, warning=FALSE)
+opts_knit$set(root.dir ='~/Dropbox/Stanford_Matters/data/THAL/CCEP/results/explore2_redoPreProc_dataSort_Decomposition')
+
+```
+
+
+```{r}
+setwd('~/Dropbox/Stanford_Matters/data/THAL/CCEP/results/explore2_redoPreProc_dataSort_Decomposition')
+d = read.csv('table_CCEPnewpipOutput_wholebrain_anatomical_info_activationRedone.csv')
+
+# further filter data
+vnames = colnames(d)
+peakMat = d[,grep('pks_time', vnames)]
+#write.csv(d, na = "NaN", quote = FALSE, file = 'table_CCEPnewpipOutput_wholebrain_anatomical_info2_JPlabelsorted.csv')
+#=================================================================================================
+d0 <- d %>% filter((!JP_label_in %in% c("","empty","NAN","EXCLUDE", 'NA', 'INSULA/LFC')) &
+  (!JP_label_out  %in% c("","empty","NAN","EXCLUDE", 'NA', 'INSULA/LFC')) & 
+    rCrossBorder == 0 & sCrossBorder == 0 & eudDist>5 &
+    rowSums(peakMat, na.rm=TRUE) > 10
+  ) 
+anatomy_order <- c("ACC", "LFC", 'MFC', 'FP', 'OFC','SM',
+                                            'INS', 'ITG', 'MTG', 'STG', 'TP', 'HPC', 'PHG', 'FG',
+                                            'IPL', 'SPL', 'PMC', 'MCC',
+                                            'OCC',
+                                            'AMY', 'BG', 'CLT', 'antTH', 'midTH', 'pstTH')
+JP_label = anatomy_order
+```
+
+
+### Compare activation among thalamus divisions
+#### Downstream pathways
+
+```{r filter activated CCEP}
+pktimes <- data.matrix(d0[,grepl('pks_time_', names(d0))])
+```
+
+```{r k-means clustering, fig.width=3, fig.height=2}
+pkvec = t(Reshape(pktimes, 1))
+dvec = pkvec[!is.na(pkvec)]
+set.seed(666)
+res.km <- kmeans(dvec, 3, nstart = 100)
+
+dc1 <- dvec[res.km$cluster==1]
+dc2 <- dvec[res.km$cluster==2]
+dc3 <- dvec[res.km$cluster==3]
+df <- data.frame(cluster = c(rep('cluster 2', length(dc1)),
+                         rep('cluster 1', length(dc2)),
+                         rep('cluster 3', length(dc3))
+                         ),
+                 pktimes = c(dc1, dc2, dc3)
+                 )
+
+colors <- viridis(3)
+ggplot(df, aes(x=pktimes, fill=cluster)) +
+  geom_histogram( color='#e9ecef', alpha=0.6, bins = 100, position='identity') +
+  scale_fill_viridis_d() + theme_bw() +
+theme(legend.position = c(0.8, 0.8))
+
+# add cluster label
+pkcluster <- pkvec
+pkcluster[!is.na(pkvec)] <- res.km$cluster
+pkcluster <- Reshape(pkcluster, size(pktimes)[1], size(pktimes)[2])
+incluster1 <- unique(which(pkcluster==1, arr.ind=TRUE)[,1])
+incluster2 <- unique(which(pkcluster==2, arr.ind=TRUE)[,1])  
+incluster3 <- unique(which(pkcluster==3, arr.ind=TRUE)[,1])  
+
+pk1 <- rep(NA, size(pktimes)[1] )
+pk2 <- rep(NA, size(pktimes)[1] )
+pk3 <- rep(NA, size(pktimes)[1] )
+pk1[incluster2] <- 1
+pk2[incluster1] <- 1 # the original 2 cluster is renamed to the "cluster 1" -> ordered in time
+pk3[incluster3] <- 1
+
+d0$pk1 <- pk1
+d0$pk2 <- pk2
+d0$pk3 <- pk3
+
+#save d0
+write.csv(d0, '~/Dropbox/Stanford_Matters/data/THAL/CCEP/results/explore2_redoPreProc_dataSort_Decomposition/metaT_withPeakClusters_Routput.csv')
+
+```
+
+
+## Select brain areas for statistical testing
+
+
+```{r}
+Area <- data.frame(JP_label = c(), nElec=c(), nSample = c()) # good for doing mixed design, interaction effect between ROI and pathway, when nElec > 1
+Area1 <- data.frame(JP_label = c(), nElec=c(), nSample = c()) # good for doing mixed design for antTh and pstTh comparison in outflow pathway
+Area2 <- data.frame(JP_label = c(), nElec=c(), nSample = c()) # good for doing mixed design for antTh and pstTh comparison in inflow pathway
+
+commonElecList1 <- matrix(list(), length(JP_label),1)
+commonElecList2 <- matrix(list(), length(JP_label),1)
+commonElecList <- matrix(list(), length(JP_label),1)
+
+n <- 0
+for (jplabel in JP_label){
+  if (jplabel %in% c('antTH', 'pstTH')){next}
+  n <- n + 1
+  # outflow
+  d_1 <- d0 %>% filter( JP_label_out %in% c('antTH', 'pstTH') & JP_label_in == jplabel) %>%
+    mutate(pathway = 'outflow', ROI = JP_label_out, JP_label = JP_label_in,
+           elecID = paste(aSubID, record_chan)) %>% select(pathway, ROI, elecID, JP_label)
+  # inflow
+  d_2 <- d0 %>% filter(JP_label_in %in% c('antTH', 'pstTH') & JP_label_out == jplabel) %>%
+    mutate(pathway = 'inflow', ROI = JP_label_in, JP_label = JP_label_out,
+           elecID = paste(aSubID, stim_chan)) %>% select(pathway, ROI, elecID, JP_label)
+  
+   commonE1 = intersect(d_1$elecID[d_1$ROI=='antTH'], d_1$elecID[d_1$ROI=='pstTH'])
+   commonE2 = intersect(d_2$elecID[d_2$ROI=='antTH'], d_2$elecID[d_2$ROI=='pstTH'])
+   commonE  = intersect(commonE1, commonE2)
+   
+   d_ <- rbind(d_1,d_2) %>% filter(elecID %in% commonE)
+   #calculate how many CCEP there is for each unique ElecID (i.e. how many elecs in the antTH or pstTH)
+   nE = c()
+   for (e in commonE1){nE = c(nE, dim(d_1[d_1$elecID == e,])[1])}
+   commonElecList1[[n]] <- list(elec = commonE1, N = nE)
+   
+   nE = c()
+   for (e in commonE2){nE = c(nE, dim(d_2[d_2$elecID == e,])[1])}
+   commonElecList2[[n]] <- list(elec = commonE2, N = nE)
+   
+   nE = c()
+   for (e in commonE){nE = c(nE, dim(d_[d_$elecID == e,])[1])}
+   commonElecList[[n]] <- list(elec = commonE, N = nE)
+   
+  Area1 <- rbind(Area1, data.frame(JP_label = jplabel,  nElec = length(commonE1), 
+                                 nSample = length(which(d_1$elecID %in% commonE1))))
+                                 
+  Area2 <- rbind(Area2, data.frame(JP_label = jplabel,  nElec = length(commonE2), 
+                                 nSample= length(which(d_2$elecID %in% commonE2))))
+  
+  Area <- rbind(Area, data.frame(JP_label = jplabel,  nElec = length(commonE), 
+                                 nSample = length(which(d_$elecID %in% commonE))))
+}
+
+```
+
+```{r}
+# reorganize data
+ROIs = c('antTH','midTH','pstTH')
+dTH <- data.frame()
+
+for(roi in ROIs){
+
+dout_roi<- d0 %>% filter(JP_label_in != roi & JP_label_out == roi) %>% 
+  mutate(elecID = paste(aSubID, record_chan), JP_label = JP_label_in, Net1 = Yeo7_in1, Net2 = Yeo7_in2, pathway = 'outflow', ROI = roi) %>% 
+  select(subject, aSubID, ROI, pathway, elecID, JP_label,osc_speed, min_pk_time, Net1, Net2, activated, activated_default, activated_simpRule, CECS, CECS_activation, pk1, pk2, pk3) 
+
+din_roi <- d0 %>% filter(JP_label_in == roi & JP_label_out != roi) %>% 
+  mutate(elecID = paste(aSubID, stim_chan), JP_label = JP_label_out, Net1 = Yeo7_out1, Net2 = Yeo7_out2, pathway = 'inflow', ROI = roi) %>% 
+  select(subject, aSubID, ROI,pathway, elecID, JP_label, osc_speed, min_pk_time, Net1, Net2, activated, activated_default, activated_simpRule, CECS, CECS_activation, pk1, pk2, pk3) 
+
+dTH <- rbind(dTH, din_roi, dout_roi)  
+}
+```
+
+### Outflow pathway
+
+
+```{r outflow pathway, within-electroded test}
+area1 <- Area1$JP_label[Area1$nElec>=2 & Area1$nSample >=10]
+path = 'outflow'
+sigarea1 <- data.frame(area=c(), P=c(), Estimate=c(),tvalue=c())
+
+for (jplabel in area1){
+Elec<- commonElecList1[[which(Area1$JP_label == jplabel)]]$elec
+dTH_ <- dTH %>% filter(elecID %in% Elec & JP_label==jplabel & ROI!='midTH' & pathway==path) %>% 
+  mutate(ROI_code = case_when(
+    ROI == 'antTH' ~ -1,
+    ROI == 'pstTH' ~ 1
+  )) # coding is not necessary
+ml0 <- lmer(CECS ~ 1|elecID , dTH_, na.action=na.exclude)
+ml <- lmer(CECS ~ ROI + (1|elecID) , dTH_, na.action=na.exclude)
+fprintf('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
+fprintf('\nStats for %s pathway CCEP to %s between antTH and pstTH', path, jplabel)
+resANOVA <- anova(ml0, ml)
+resML <- summary(ml)
+print(resML)
+print(resANOVA)
+coeff <- resML$coefficients
+est<- coeff[grepl('ROI',rownames(coeff)), colnames(coeff)=='Estimate']
+t <- coeff[grepl('ROI',rownames(coeff)), colnames(coeff)=='t value']
+sigarea1<- rbind(sigarea1, 
+                 data.frame(area=jplabel,
+                            Estimate=est,
+                            tvalue=t, 
+                            P=resANOVA$`Pr(>Chisq)`[2]
+                            ))
+
+}
+sigarea1<- sigarea1 %>% mutate(P.adj = p.adjust(P, method="fdr"))
+write.csv(sigarea1,'~/Dropbox/Stanford_Matters/data/THAL/CCEP/results/explore2_redoPreProc_dataSort_Decomposition/sigTest_CECS_lmer_WithinElecCmp_antVSpst_outflow.csv')
+```
+
+```{r, fig.width=2, fig.height=2}
+sigarea<-sigarea1
+fprintf('\n Significant areas: %s', str_c(sigarea$area[sigarea$P<=0.05], collapse=', '))
+
+path = 'outflow'
+for (jplabel in sigarea$area[sigarea$P<=0.05]){
+Elec<- commonElecList1[[which(Area1$JP_label == jplabel)]]$elec
+dTH_ <- dTH %>% filter(elecID %in% Elec & JP_label==jplabel & ROI!='midTH' & pathway==path)
+dTH_mean <- dTH_ %>% 
+  group_by(ROI, elecID) %>% 
+  summarize(average = mean(CECS),
+            sd = sd(CECS, na.rm=TRUE)) %>% 
+  ungroup()
+splits<- str_split(Elec, ' ')
+subs<- c()
+for (i in 1:length(splits)){subs<- c(subs, splits[[i]][1])}
+subs<-unique(subs)
+# create plot using ggplot() and geom_boxplot() functions
+ttl <- sprintf('Within-electrode CECS comparison\n (outflow to %s)', jplabel)
+
+anot<-sprintf("P(>Chisq) = %.04f\nP(FDR-adj) = %.03f\nContrast = %.02f\nT-value = %.02f\nN(sbj) = %d", 
+                sigarea$P[sigarea$area==jplabel], sigarea$P.adj[sigarea$area==jplabel], 
+              sigarea$Estimate[sigarea$area==jplabel], sigarea$tvalue[sigarea$area==jplabel],
+              length(subs))
+xpos <- 0.95
+grob <- grobTree(textGrob(anot, x=xpos,  y=0.9, hjust=1,
+  gp=gpar(col="black", fontsize=7, fontface="italic")))
+dodge = 0.3
+ #plot
+p<- ggplot(dTH_, mapping = aes(ROI, CECS)) +
+  geom_violin(color = "gray20", trim = FALSE, 
+              draw_quantiles = c(0.5), linetype='dashed')+
+  
+  # geom_point() is used to make points at data values
+  # fill and size parameters are used to customize point
+
+  geom_pointrange(data = dTH_mean, 
+             mapping = aes(x= ROI, y = average, fill = elecID, ymin = average-sd, ymax = average+sd),
+             size=0.5,shape=21, alpha = 0.75, 
+             position=position_dodge(width=dodge ))+
+    
+  geom_line(data = dTH_mean, 
+            mapping = aes(x = ROI, y = average, group = elecID), 
+            alpha = 0.4, color = 'grey20',
+            position=position_dodge(width=dodge ), size = 0.4)+
+    
+  geom_point(aes(color=elecID), 
+             position=position_dodge(width=dodge ), size=0.4,alpha=0.8) + 
+  #annotate("text",x = 1, y = 0.95,label = anot)+   
+    ylim(0, max(dTH_$CECS)*1.5)+
+ annotation_custom(grob)+
+  ggtitle(ttl)+
+  theme_classic() +
+  theme(legend.position="none")
+
+print(p)
+
+# save plot
+figpath <- '~/Dropbox/Stanford_Matters/data/THAL/CCEP/Plots/explore2/R_stats'
+figname<-sprintf('%s/CEC %s with %s compare ant_pst.png', figpath, path, jplabel)
+png(figname,
+    width     = 4,
+    height    = 4.1,
+    units     = "in",
+    res       = 300,
+    pointsize = 4)
+print(p)
+dev.off()
+
+}
+```
+
+
+### Inflow pathway
+
+```{r inflow pathway, within-electroded test}
+area2 <- Area2$JP_label[Area2$nElec>=2 & Area2$nSample >=10]
+path = 'inflow'
+sigarea2 <- data.frame(area=c(), P=c(), Estimate=c(),tvalue=c())
+for (jplabel in area2){
+Elec<- commonElecList2[[which(Area2$JP_label == jplabel)]]$elec
+dTH_ <- dTH %>% filter(elecID %in% Elec & JP_label==jplabel & ROI!='midTH' & pathway==path) %>% 
+  mutate(ROI_code = case_when(
+    ROI == 'antTH' ~ -1,
+    ROI == 'pstTH' ~ 1
+  )) # coding is not necessary
+ml0 <- lmer(CECS ~ 1|elecID , dTH_, na.action=na.exclude)
+ml <- lmer(CECS ~ ROI + (1|elecID) , dTH_, na.action=na.exclude)
+fprintf('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
+fprintf('\nStats for %s pathway CCEP from %s between antTH and pstTH', path, jplabel)
+resANOVA <- anova(ml0, ml)
+resML <- summary(ml)
+print(resML)
+print(resANOVA)
+coeff <- resML$coefficients
+est<- coeff[grepl('ROI',rownames(coeff)), colnames(coeff)=='Estimate']
+t <- coeff[grepl('ROI',rownames(coeff)), colnames(coeff)=='t value']
+sigarea2<- rbind(sigarea2, 
+                 data.frame(area=jplabel,
+                            Estimate=est,
+                            tvalue=t, 
+                            P=resANOVA$`Pr(>Chisq)`[2]
+                            ))
+
+}
+sigarea2<- sigarea2 %>% mutate(P.adj = p.adjust(P, method="fdr"))
+write.csv(sigarea2,'~/Dropbox/Stanford_Matters/data/THAL/CCEP/results/explore2_redoPreProc_dataSort_Decomposition/sigTest_CECS_lmer_WithinElecCmp_antVSpst_inflow.csv')
+```
+
+```{r, fig.width=2, fig.height=2}
+sigarea<-sigarea2
+fprintf('\n Significant areas: %s', str_c(sigarea$area[sigarea$P<=0.05], collapse=', '))
+
+path = 'inflow'
+for (jplabel in sigarea$area[sigarea$P<=0.05]){
+Elec<- commonElecList2[[which(Area2$JP_label == jplabel)]]$elec
+dTH_ <- dTH %>% filter(elecID %in% Elec & JP_label==jplabel & ROI!='midTH' & pathway==path)
+dTH_mean <- dTH_ %>% 
+  group_by(ROI, elecID) %>% 
+  summarize(average = mean(CECS),
+            sd = sd(CECS, na.rm=TRUE)) %>% 
+  ungroup()
+splits<- str_split(Elec, ' ')
+subs<- c()
+for (i in 1:length(splits)){subs<- c(subs, splits[[i]][1])}
+subs<-unique(subs)
+# create plot using ggplot() and geom_boxplot() functions
+ttl <- sprintf('Within-electrode CECS comparison\n (inflow from %s)', jplabel)
+
+anot<-sprintf("P(>Chisq) = %.04f\nP(FDR-adj) = %.03f\nContrast = %.02f\nT-value = %.02f\nN(sbj) = %d", 
+                sigarea$P[sigarea$area==jplabel], sigarea$P.adj[sigarea$area==jplabel], 
+              sigarea$Estimate[sigarea$area==jplabel], sigarea$tvalue[sigarea$area==jplabel],
+              length(subs))
+xpos <- 0.95
+grob <- grobTree(textGrob(anot, x=xpos,  y=0.9, hjust=1,
+  gp=gpar(col="black", fontsize=7, fontface="italic")))
+dodge = 0.25
+ #plot
+p<-ggplot(dTH_, mapping = aes(ROI, CECS)) +
+  geom_violin(color = "gray20", trim = FALSE, 
+              draw_quantiles = c(0.5), linetype='dashed')+
+  
+  # geom_point() is used to make points at data values
+  # fill and size parameters are used to customize point
+
+  geom_pointrange(data = dTH_mean, 
+             mapping = aes(x= ROI, y = average, fill = elecID, ymin = average-sd, ymax = average+sd),
+             size=0.5,shape=21, alpha = 0.75, 
+             position=position_dodge(width=dodge ))+
+    
+  geom_line(data = dTH_mean, 
+            mapping = aes(x = ROI, y = average, group = elecID), 
+            alpha = 0.4, color = 'grey20',
+            position=position_dodge(width=dodge ), size = 0.4)+
+    
+  geom_point(aes(color=elecID), 
+             position=position_dodge(width=dodge ), size=0.4,alpha=0.8) + 
+  #annotate("text",x = 1, y = 0.95,label = anot)+   
+    ylim(0, max(dTH_$CECS)*1.5)+
+ annotation_custom(grob)+
+  ggtitle(ttl)+
+  theme_classic() +
+  theme(legend.position="none")
+
+  print(p)
+# save plot
+figpath <- '~/Dropbox/Stanford_Matters/data/THAL/CCEP/Plots/explore2/R_stats'
+figname<-sprintf('%s/CEC %s with %s compare ant_pst.png', figpath, path, jplabel)
+png(figname,
+    width     = 4,
+    height    = 4.1,
+    units     = "in",
+    res       = 300,
+    pointsize = 4)
+print(p)
+dev.off()
+}
+```
