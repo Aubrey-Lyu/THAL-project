@@ -1,0 +1,74 @@
+home_dir = '/data/dian'; %'/home/lvdian'; %
+% don't have enough working memory to run this task!
+addpath(genpath(fullfile(home_dir, 'Dropbox/scripts/external/cbrewer2/cbrewer2')));
+addpath(fullfile(home_dir, 'Dropbox/scripts/Stanford/CECS_Pipeline_COPY/personal_validation'))
+addpath('~/scripts/my_functions')
+addpath(genpath('~/scripts/Stanford/ThalamocoricalLoop-project'))
+addpath(fullfile(home_dir, 'Dropbox/scripts/Stanford/CECS_Pipeline_COPY/CECS_Pipeline/CCEP_pipeline/HFB plot/subfunctions'));
+
+data_folder = '~/Dropbox/Stanford_Matters/data/THAL/CCEP/results/explore5_locked/spectCCEP';
+result_folder =  '~/Dropbox/Stanford_Matters/data/THAL/UMAP/ALLDATA_semisupervise';
+outfigDir = '~/Dropbox/Stanford_Matters/data/THAL/PLOTS/UMAP/supervisedLearn_Group';
+
+%% load labels
+T = readtable(fullfile(result_folder, 'brainInfo.csv'));
+features = readcell(fullfile(result_folder, 'cleanFeatures.txt'), Delimiter = "");
+isnoise = textread(fullfile(result_folder, 'isnoise.txt'), '%d', 'delimiter', '\n');
+T0 = T(isnoise==0,:);
+T1 = T(isnoise==1,:);
+features0 = features(isnoise==0);
+
+sblist = unique(T.aSubID);
+ratio = ones(length(sblist),1);
+for sn = 1:length(sblist)
+    sb = sblist{sn};
+    nall = length(find(strcmp(T.aSubID, sb)));
+    ngood = length(find(strcmp(T0.aSubID, sb)));
+    ratio(sn) = ngood/nall;
+end
+
+close;figure;bar(categorical(strrep(sblist, '_', '\_')), ratio, 'FaceColor','none'), box off
+
+%% load data based on each clean feature categrories
+Ftrs = unique(features0);
+spectCCEP_featured = struct();
+
+for i = 1:length(Ftrs)
+    ftr = Ftrs{i};
+    spectCCEP_featured(i).feature = ftr;
+
+    fIdx = strcmp(features0, ftr);
+    t0 = T0(fIdx,:);
+
+    spect_ccep_power = nan(length(fIdx), 501, 59);
+    spect_ccep_itpc  = nan(length(fIdx), 501, 59);
+    filterIdx = [];
+tic
+    for sn = 1%:length(sblist)
+
+        sIdx = find(strcmp(t0.aSubID, sblist{sn}));
+
+        if isempty(sIdx)
+            continue;
+        end
+
+        load(fullfile(data_folder, ['spectCCEP_power_' t0.subject{sIdx(1)}]));
+        load(fullfile(data_folder, ['spectCCEP_itpc_' t0.subject{sIdx(1)}]));
+
+        [filter_idx,~, row2select] = intersect(t0.index(sIdx)+1, idx_in_metaT,  'stable'); % +1 account for python emuerating starting from 0
+
+        spect1 = CCEP_power(row2select,:,:);
+        spect2 = CCEP_itpc(row2select,:,:);
+
+        spect_ccep_power(sIdx,:,:) = spect1;
+        spect_ccep_itpc(sIdx,:,:)  = spect2;
+
+        filterIdx = [filterIdx; filter_idx];
+
+    end
+    spectCCEP_featured(i).spectCCEP_power = spect_ccep_power;
+    spectCCEP_featured(i).spectCCEP_itpc = spect_ccep_itpc;
+    spectCCEP_featured(i).idx_in_metaT = filterIdx;
+ 
+end
+toc

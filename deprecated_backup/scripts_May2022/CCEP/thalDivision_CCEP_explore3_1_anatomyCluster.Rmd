@@ -1,0 +1,319 @@
+---
+title: "Thalamus divisions CCEP comparison"
+output:
+  html_document:
+    df_print: paged
+---
+
+Note: Based on the antTH vs pstTH CCEP ITPC comparison, we can see distinct trends of ups and downs in the electrode wise comparisons, hence we hypothesize that there is a systematical clustering of the antTH-pstTH ITPC differences due to a functionally division within the anatomical regions of interest. Here we are testing this hypothesis for SM and PMC.
+
+```{r setup, include=FALSE}
+require(knitr)
+require(plyr)
+library(dplyr)
+library(stringr)
+library(ggplot2)
+library(hrbrthemes)
+library(viridisLite)
+require(reshape2)
+library(tidyr)
+library(gmodels)
+library(fmsb)
+library(RColorBrewer)
+library(ggpubr)
+library(vtable)
+library(grid)
+library(kableExtra)
+library(factoextra)
+library(pracma)
+library(lme4)
+
+opts_chunk$set(echo = FALSE, message=FALSE, warning=FALSE)
+output_folder = '~/Dropbox/Stanford_Matters/data/THAL/CCEP/results/explore3_new2Sbjs'
+figpath = '~/Dropbox/Stanford_Matters/data/THAL/CCEP/Plots/explore3'
+opts_knit$set(root.dir = output_folder)
+
+```
+
+
+```{r}
+setwd('~/Dropbox/Stanford_Matters/data/THAL/CCEP/results/explore3_new2Sbjs')
+d = read.csv('table_CCEPnewpipOutput_wholebrain_anatomical_info_activationRedone.csv')
+
+# further filter data
+vnames = colnames(d)
+peakMat = d[,grep('pks_time', vnames)]
+#write.csv(d, na = "NaN", quote = FALSE, file = 'table_CCEPnewpipOutput_wholebrain_anatomical_info2_JPlabelsorted.csv')
+#=================================================================================================
+d0 <- d %>% filter((!JP_label_in %in% c("","empty","NAN","EXCLUDE", 'NA', 'INSULA/LFC')) &
+  (!JP_label_out  %in% c("","empty","NAN","EXCLUDE", 'NA', 'INSULA/LFC')) & 
+    !is.na(JP_label_in) & rCrossBorder == 0 & sCrossBorder == 0 & eudDist>5 &
+    rowSums(peakMat, na.rm=TRUE) > 10
+  ) 
+
+
+#d <- d0 %>% filter(rowSums(peakMat, na.rm=TRUE) > 10) 
+#head(d)
+
+dinUnique <- d0 %>% mutate(elec_ID = paste(subject, record_chan)) %>% select(subject, aSubID, elec_ID, JP_label_in) %>% filter(!duplicated(elec_ID))
+
+doutUnique <- d0 %>% mutate(elec_ID = paste(subject, stim_chan)) %>% select(subject, aSubID, elec_ID, JP_label_out) %>% filter(!duplicated(elec_ID))
+
+```
+
+### check electrode coverage for the recorded channels across JP_label and subjects
+```{r}
+anatomy_order <- c("ACC", "LFC", 'MFC', 'FP', 'OFC','SM',
+                                            'INS', 'ITG', 'MTG', 'STG', 'TP', 'HPC', 'PHG', 'FG',
+                                            'IPL', 'SPL', 'PMC', 'MCC',
+                                            'OCC',
+                                            'AMY', 'BG', 'CLT', 'antTH', 'midTH', 'pstTH')
+JP_label = anatomy_order
+```
+
+### Within-subject level testing:
+
+#### outflow pathway
+```{r}
+# reorganize data
+ROIs = c('antTH','midTH','pstTH')
+dTH <- data.frame()
+
+for(roi in ROIs){
+
+din_roi<- d0 %>% filter(JP_label_in != roi & JP_label_out == roi) %>% 
+  mutate(elec_ID = paste(subject, record_chan), JP_label = JP_label_in, Net1 = Yeo7_in1, Net2 = Yeo7_in2, pathway = 'outflow', ROI = roi) %>% 
+  select(subject, aSubID, ROI, pathway, elec_ID, JP_label,osc_speed, min_pk_time, Net1, Net2, activated, activated_default, activated_SimRule, CECS, CECS_activation, record_hot, stim_hot) 
+
+dout_roi <- d0 %>% filter(JP_label_in == roi & JP_label_out != roi) %>% 
+  mutate(elec_ID = paste(subject, stim_chan), JP_label = JP_label_out, Net1 = Yeo7_out1, Net2 = Yeo7_out2, pathway = 'inflow', ROI = roi) %>% 
+  select(subject, aSubID, ROI,pathway, elec_ID, JP_label, osc_speed, min_pk_time, Net1, Net2, activated, activated_default, activated_SimRule, CECS, CECS_activation, record_hot, stim_hot)  
+
+dTH <- rbind(dTH, din_roi, dout_roi)  
+}
+```
+
+
+
+```{r}
+dTH_mean <- dTH %>% filter(JP_label == 'SM') %>% 
+  group_by(ROI, elec_ID) %>% 
+  summarize(cecs = mean(CECS),
+            sd = sd(CECS, na.rm=TRUE)) %>% 
+  ungroup()
+
+dA_mean <- dTH_mean %>% filter(ROI == 'antTH', )
+dP_mean <- dTH_mean %>% filter(ROI == 'pstTH')
+dmerge <- merge(dA_mean, dP_mean, by = 'elec_ID')
+cecs_diff <- dmerge$cecs.y - dmerge$cecs.x
+
+km.res <- kmeans(cecs_diff, 2, nstart=3)
+df_cluster <- data.frame(cecs_diff = cecs_diff, cluster = km.res$cluster, elec_ID=dmerge$elec_ID) %>% 
+  mutate(cluster_cat = case_when(
+    cluster == 1 ~ '1',
+    cluster == 2 ~ '2'
+  ))
+
+ggplot(df_cluster, aes(cecs_diff, fill = cluster_cat)) + geom_density(alpha = 0.2)+
+  theme_classic2()
+
+#write.csv(df_cluster, paste0(output_folder, '/R_stats/intermediate/', 'TH_PMC_cscwithclusters.csv'))
+
+```
+
+
+```{r test the cecs_diff relationship with self-hot}
+dTH_PMC <- dTH %>% filter(JP_label == 'PMC')  %>% 
+  mutate(hot_temp = 
+               case_when(pathway=='outflow' ~ record_hot,
+                         pathway=='inflow' ~ stim_hot
+                           )) %>%
+  mutate( hot = case_when(is.na(hot_temp) ~ 0, !is.na(hot_temp) ~ hot_temp)) %>% 
+  select(-hot_temp) %>% 
+  mutate(hot_cat = case_when(
+    hot==1~'hot',
+    hot==0~'nohot'
+  ))
+
+```
+
+```{r}
+
+dTH_PMC_mean <- dTH_PMC %>% 
+  group_by(ROI, elec_ID) %>% 
+  summarize(cecs = mean(CECS),
+            sd = sd(CECS, na.rm=TRUE)) %>% 
+  ungroup()
+
+
+```
+
+
+```{r outflow pathway, individual test}
+area1 <- Area1$JP_label[Area1$nSubs>1]
+path = 'outflow'
+sigarea1 <- data.frame(area=c(), P=c(), Estimate=c(),tvalue=c())
+
+for (jplabel in area1){
+sbjs <- unlist(commonSbList1[which(Area1$JP_label == jplabel)])
+dTH_ <- dTH %>% filter(aSubID %in% sbjs & JP_label==jplabel & ROI!='midTH' & pathway==path)
+ml0 <- lmer(CECS ~ (1|subject) + (1|elec_ID), dTH_)
+ml <- lmer(CECS ~ ROI+(1|subject)+ (1|elec_ID), dTH_)
+fprintf('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
+fprintf('\nStats for %s pathway CCEP to %s between antTH and pstTH', path, jplabel)
+
+resANOVA <- anova(ml0, ml)
+resML <- summary(ml)
+print(resML)
+print(resANOVA)
+coeff <- resML$coefficients
+est<- coeff[grepl('ROI',rownames(coeff)), colnames(coeff)=='Estimate']
+t <- coeff[grepl('ROI',rownames(coeff)), colnames(coeff)=='t value']
+sigarea1<- rbind(sigarea1, 
+                 data.frame(area=jplabel,
+                            Estimate=est,
+                            tvalue=t, 
+                            P=resANOVA$`Pr(>Chisq)`[2]
+                            ))
+}
+sigarea1<- sigarea1 %>% mutate(P.adj = p.adjust(P, method="fdr"))
+
+```
+
+
+#### inflow pathway
+
+```{r inflow pathway, individual test}
+area2 <- Area2$JP_label[Area2$nSubs>1]
+sigarea2 <- data.frame(area=c(), P=c(), Estimate=c(),tvalue=c())
+path = 'inflow'
+for (jplabel in area2){ 
+sbjs <- unlist(commonSbList2[which(Area2$JP_label == jplabel)])
+dTH_ <- dTH %>% filter(aSubID %in% sbjs & JP_label==jplabel & ROI!='midTH' & pathway==path)
+ml0 <- lmer(CECS ~ (1|subject)+ (1|elec_ID), dTH_)
+ml <- lmer(CECS ~ ROI+(1|subject)+ (1|elec_ID), dTH_)
+fprintf('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
+fprintf('\nStats for %s pathway CCEP from %s between antTH and pstTH', path, jplabel)
+resANOVA <- anova(ml0, ml)
+resML <- summary(ml)
+print(resML)
+print(resANOVA)
+coeff <- resML$coefficients
+est<- coeff[grepl('ROI',rownames(coeff)), colnames(coeff)=='Estimate']
+t <- coeff[grepl('ROI',rownames(coeff)), colnames(coeff)=='t value']
+sigarea2<- rbind(sigarea2, 
+                 data.frame(area=jplabel,
+                            Estimate=est,
+                            tvalue=t, 
+                            P=resANOVA$`Pr(>Chisq)`[2]
+                            ))
+
+}
+
+sigarea2<- sigarea2 %>% mutate(P.adj = p.adjust(P, method="fdr"))
+
+```
+
+
+```{r, fig.width=2, fig.height=2}
+sigarea<- sigarea2
+area2 <- Area2$JP_label[Area2$nSubs>1]
+path = 'inflow'
+for (jplabel in area2){
+sbjs <- unlist(commonSbList2[which(Area2$JP_label == jplabel)])
+dTH_ <- dTH %>% filter(aSubID %in% sbjs & JP_label==jplabel & ROI!='midTH' & pathway==path)
+dTH_mean <- dTH_ %>% 
+  group_by(ROI, aSubID) %>% 
+  summarize(average = mean(CECS),
+            sd = sd(CECS, na.rm=TRUE)) %>% 
+  ungroup()
+# create plot using ggplot() and geom_boxplot() functions
+ttl <- sprintf('Within-individual CECS comparison\n(inflow from %s)', jplabel)
+# annotations
+anot<-sprintf("P(>Chisq) = %.04f\nP(FDR-adj) = %.03f\nContrast = %.02f\nT-value = %.02f\nN(elec) = %d", 
+                sigarea$P[sigarea$area==jplabel], sigarea$P.adj[sigarea$area==jplabel], 
+              sigarea$Estimate[sigarea$area==jplabel], sigarea$tvalue[sigarea$area==jplabel],
+              Area1$nElec[Area1$JP_label==jplabel])
+xpos <- 0.5
+grob <- grobTree(textGrob(anot, x=xpos,  y=0.9,
+  gp=gpar(col="black", fontsize=7, fontface="italic")))
+
+dodge = 0.3
+## plot
+p <- ggplot(dTH_, mapping = aes(ROI, CECS)) +
+  geom_violin(color = "gray20", trim = FALSE, 
+              draw_quantiles = c(0.5), linetype='dashed')+
+  
+  # geom_point() is used to make points at data values
+  # fill and size parameters are used to customize point
+
+  geom_pointrange(data = dTH_mean, 
+             mapping = aes(x= ROI, y = average, fill = aSubID, ymin = average-sd, ymax = average+sd),
+             size=0.8,shape=21, alpha = 0.7, position=position_dodge(width=dodge))+
+  geom_line(data = dTH_mean, 
+            mapping = aes(x = ROI, y = average, group = aSubID), 
+            position=position_dodge(width=dodge), size = 0.6, color = 'grey80')+
+  geom_point(aes(color=aSubID), position=position_dodge(width=dodge), size=0.5,alpha=0.6) + 
+  # annot
+   ylim(0, max(dTH_$CECS)*1.5)+
+ annotation_custom(grob)+
+  ggtitle(ttl)+
+  theme_minimal() 
+
+print(p)
+
+# #save plot
+# outDir <- paste0(figpath,'/R_stats')
+# figname<-sprintf('%s/CEC %s with %s compare ant_pst_withinSbj.png', outDir, path, jplabel)
+# png(figname,
+#     width     = 4,
+#     height    = 4.1,
+#     units     = "in",
+#     res       = 300,
+#     pointsize = 4)
+# print(p)
+# dev.off()
+
+
+}
+```
+
+
+
+### Test interaction effect between ROI and pathway
+
+```{r}
+# test interaction
+area3 <- Area$JP_label[Area$nSubs>1]
+
+sigarea3 <- data.frame(area=c(), P=c(), Estimate=c(),tvalue=c())
+
+for (jplabel in area3){
+sbjs <- unlist(commonSbList[which(Area$JP_label == jplabel)])
+dTH_ <- dTH %>% filter(aSubID %in% sbjs & JP_label==jplabel & ROI!='midTH')
+ml0 <- lmer(CECS ~ ROI+pathway+(1|subject)+ (1|elec_ID), dTH_)
+ml <- lmer(CECS ~ ROI*pathway+(1|subject)+ (1|elec_ID), dTH_)
+fprintf('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
+fprintf('\nStats for %s pathway CCEP to %s between antTH and pstTH', path, jplabel)
+
+resANOVA <- anova(ml0, ml)
+resML <- summary(ml)
+print(resML)
+print(resANOVA)
+coeff <- resML$coefficients
+est<- coeff[grepl(':',rownames(coeff)), colnames(coeff)=='Estimate']
+t <- coeff[grepl(':',rownames(coeff)), colnames(coeff)=='t value']
+sigarea3<- rbind(sigarea3,
+                 data.frame(area=jplabel,
+                            Estimate=est,
+                            tvalue=t,
+                            P=resANOVA$`Pr(>Chisq)`[2]
+                            ))
+}
+sigarea3 <- sigarea3 %>% mutate(P.adj = p.adjust(P, method="fdr"))
+# print(sigarea3)
+# write.csv(sigarea3, paste0(output_folder, '/R_stats/sigTest_CECS_lmer_WithinSubjCmp_antVSpst_ROIpathInter.csv'))
+```
+
+
+

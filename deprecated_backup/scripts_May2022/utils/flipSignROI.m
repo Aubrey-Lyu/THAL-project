@@ -1,4 +1,4 @@
-function [ccep_flipped,toflip,C] = flipSignROI(ccep, peakTimeMat, onset, corr_thr,hottimezone)
+function [ccep_flipped,toflip,C] = flipSignROI(ccep, peakTimeMat, onset, corr_thr)
 % ccep dimension = stimPair * T
 % assuming samping rate is 1000
 % peakTimeMat = data array with each row indicating the time point when an
@@ -13,58 +13,38 @@ function [ccep_flipped,toflip,C] = flipSignROI(ccep, peakTimeMat, onset, corr_th
 % ccep_flipped: flipped CCEP to insure the maximum correlation with a
 % template;
 % C records the mean correlation value along the iteration
-if nargin < 2
-    peakTimeMat = [];
-end
-
-if ~isempty(peakTimeMat) 
-    if size(ccep,1) == size(peakTimeMat,1)
-        ccep = ccep';
-    else
-        if size(ccep,2) ~= size(c,1)
-            error('Data dimension and peakTimeMat dimension do not match.')
-        end
-        % otherwise, the ccep has the desired dimention, do nothing.
+if size(ccep,1) == size(peakTimeMat,1)
+    ccep = ccep';
+else
+    if size(ccep,2) ~= size(peakTimeMat,1)
+        error('Data dimension and peakTimeMat dimension do not match.')
     end
+    % otherwise, the ccep has the desired dimention, do nothing.
 end
 
-if nargin < 3 || isempty(onset)
+
+if nargin < 3
     % assuming the onset starts from the 200 time point
     onset = 200;
 end
 
-if nargin < 4 || isempty(corr_thr)
+if nargin < 4
     corr_thr = 0.2;
 end
 corr_thr = abs(corr_thr);
 % time used to do calculation
 calc_time = (1+onset):size(ccep,1) ;
 
-% hot zone from which the maximum value dominates the initial flips
-if nargin < 5 || isempty(hottimezone)
-    hottimezone = [16:80 200:500];
-end
 
 %% initial flip
-if ~isempty(peakTimeMat)
-    actIdx = ~isnan(mean(peakTimeMat, 2, 'omitnan'));
-    ccep_act = ccep(calc_time,actIdx);
-
-    peaks = peakTimeMat(actIdx,:);
-else
-    peaks = [];
-    ccep_act = ccep(calc_time,:);
-end
-
+actIdx = ~isnan(mean(peakTimeMat, 2, 'omitnan'));
+ccep_act = ccep(calc_time,actIdx);
+peaks = peakTimeMat(actIdx,:);
+hottimezone = [16:80 200:500];
 
 for i = 1:size(ccep_act,2)
-    if ~isempty(peaks)
-        peak = peaks(i,:);
-        peak(~isnan(peak) | peak>max(calc_time)) = [];
-    else
-        peak = [];
-    end
-
+    peak = peaks(i,:);
+    peak(~isnan(peak) | peak>max(calc_time)) = [];
     if isempty(peak)
         val = max(ccep_act(hottimezone,i), [], 1, 'omitnan');
     else
@@ -90,13 +70,9 @@ C = nan(Nitr,1);
 for c = 1:Nitr
 
     template = mean(ccep(calc_time,tokeep), 2, 'omitnan');
-    n = size(ccep,2);
-    cor = zeros(n,1);
-    parfor i = 1:n
-        ccep_ = ccep(calc_time,i);
-        corr = corrcoef([template, ccep_]);
-        cor(i) = corr(2,1);
-    end
+
+    corr = corrcoef([template, ccep(calc_time,:)]);
+    cor = corr(2:end,1);
     avcor0 = mean(cor, 'omitnan');
 
     toflip = cor < (-1*corr_thr); % negatively correlated
@@ -105,13 +81,8 @@ for c = 1:Nitr
     % to do flip tentatively
     ccep1 = ccep; toflip1 = toflip;
     ccep1(:,toflip1) = -1.* ccep1(:,toflip1);
-    n = size(ccep1,2);
-    cor = zeros(n,1);
-    parfor i = 1:n
-        ccep_ = ccep1(calc_time,i);
-        corr = corrcoef([template, ccep_]);
-        cor(i) = corr(2,1);
-    end
+    corr = corrcoef([template, ccep1(calc_time,:)]);
+    cor = corr(2:end,1);
     avcor1 = mean(cor, 'omitnan');
 
     %-- evaluate ---

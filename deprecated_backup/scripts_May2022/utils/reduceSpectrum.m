@@ -5,8 +5,8 @@ function [rdata, rfreq, rtime] = reduceSpectrum(data,freq,time, kfreq, ktime, to
 % and high
 % ntime is a vector with each element is the number of time points to
 % downsample
-% for the following time window : -5-10ms (artifact), 10-117ms (1st peak),
-% 118-282ms (2nd peak), 283-700ms (3rd peak)
+% for the following time window : -5-10s (artifact), 10-117s (1st peak),
+% 118-282s (2nd peak), 283-700s (3rd peak)
 %(assuming the input time starts from -0.5 ms, sampling rate is 200)
 
 % output: reduced spectrum matrix of a single CCEP with the dimension of (sum(kfreq) * sum(ktime));
@@ -32,7 +32,7 @@ if nargin < 6
 end
 %%
 freqSeg = [0.5 5; 5 8; 8 15; 15 30; 30 70; 70 256];
-timeSeg = [-30 10; 10 117; 117 283; 283 800];
+timeSeg = [-30 10; 10 117; 117 290; 282 800];
 
 % reduce on the frequency domain
 rdata0 = nan(sum(kfreq), length(time));

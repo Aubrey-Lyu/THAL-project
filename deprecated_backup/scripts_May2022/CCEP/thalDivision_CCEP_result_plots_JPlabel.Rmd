@@ -1,0 +1,1008 @@
+---
+title: "Thalamus divisions CCEP comparison"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+require(knitr)
+require(plyr)
+library(dplyr)
+library(stringr)
+library(ggplot2)
+library(hrbrthemes)
+library(viridisLite)
+require(reshape2)
+library(tidyr)
+library(gmodels)
+library(fmsb)
+library(RColorBrewer)
+library(ggpubr)
+library(vtable)
+library(grid)
+library(kableExtra)
+library(factoextra)
+library(pracma)
+library(lme4)
+
+opts_chunk$set(echo = FALSE, message=FALSE, warning=FALSE)
+opts_knit$set(root.dir ='~/Dropbox/Stanford_Matters/data/THAL/CCEP/results/explore2_redoPreProc_dataSort_Decomposition')
+
+```
+
+
+```{r}
+setwd('~/Dropbox/Stanford_Matters/data/THAL/CCEP/results/explore2_redoPreProc_dataSort_Decomposition')
+d = read.csv('table_CCEPnewpipOutput_wholebrain_anatomical_info_activationRedone.csv')
+
+# further filter data
+vnames = colnames(d)
+peakMat = d[,grep('pks_time', vnames)]
+#write.csv(d, na = "NaN", quote = FALSE, file = 'table_CCEPnewpipOutput_wholebrain_anatomical_info2_JPlabelsorted.csv')
+#=================================================================================================
+d0 <- d %>% filter((!JP_label_in %in% c("","empty","NAN","EXCLUDE", 'NA', 'INSULA/LFC')) &
+  (!JP_label_out  %in% c("","empty","NAN","EXCLUDE", 'NA', 'INSULA/LFC')) & 
+    !is.na(JP_label_in) & rCrossBorder == 0 & sCrossBorder == 0 & eudDist>5 &
+    rowSums(peakMat, na.rm=TRUE) > 10
+  ) 
+
+
+#d <- d0 %>% filter(rowSums(peakMat, na.rm=TRUE) > 10) 
+#head(d)
+
+dinUnique <- d0 %>% mutate(elec_ID = paste(subject, record_chan)) %>% select(subject, aSubID, elec_ID, JP_label_in) %>% filter(!duplicated(elec_ID))
+
+doutUnique <- d0 %>% mutate(elec_ID = paste(subject, stim_chan)) %>% select(subject, aSubID, elec_ID, JP_label_out) %>% filter(!duplicated(elec_ID))
+
+# specify color:
+#hot_col = rgb(242/256, 118/256, 53/256) #蟹壳黄
+#cold_col = rgb(134/256, 157/256, 157/256) #虾壳青
+hot_col = '#8E0D0D'#Stanford crimson red
+hot_col2 =  '#BC0116'
+cold_col = '#2e3d47'#'#494A4F'
+```
+
+### check electrode coverage for the recorded channels across JP_label and subjects
+```{r}
+anatomy_order <- c("ACC", "LFC", 'MFC', 'FP', 'OFC','SM',
+                                            'INS', 'ITG', 'MTG', 'STG', 'TP', 'HPC', 'PHG', 'FG',
+                                            'IPL', 'SPL', 'PMC', 'MCC',
+                                            'OCC',
+                                            'AMY', 'BG', 'CLT', 'antTH', 'midTH', 'pstTH')
+JP_label = anatomy_order
+```
+
+```{r}
+xtable <- CrossTable(dinUnique$JP_label_in, dinUnique$aSubID, prop.t=TRUE, prop.r=TRUE, prop.c=TRUE)
+xt = xtable$t
+xt = xt[order(match(row.names(xt), anatomy_order)), ]
+
+print("Count break-down for recording channels")
+# kable(xt, "latex", booktabs = T)%>%
+#   kable_styling(latex_options = c('basic', "scale_down")) %>%
+#   save_kable('Count_breakDown_table_recording_channels.png') #%>% save_kable(file = 'Elec_coverage/Count_breakDown_table_recording_channels.png')
+
+write.csv(xt, 'Elec_coverage/Count_breakDown_table_recording_channels.csv')
+```
+
+### Check electrode coverage for the stimulated channels across JP_label and subjects
+
+```{r}
+xtable <- CrossTable(doutUnique$JP_label_out, doutUnique$aSubID, prop.t=TRUE, prop.r=TRUE, prop.c=TRUE)
+xt = xtable$t
+xt = xt[order(match(row.names(xt), anatomy_order)), ]
+
+print("Count break-down for stimulated channels")
+# kable(xt, "latex", booktabs = T)%>%
+#   kable_styling(latex_options = c('basic', "scale_down")) %>%
+#   as_image(width=6)#, file = 'Elec_coverage/Count_breakDown_table_stim_channels.png')
+
+write.csv(xt, 'Elec_coverage/Count_breakDown_table_stim_channels.csv')
+```
+
+
+
+
+### check ant/pst/mid inflow and outflow pathway electrode coverage for each subjects
+
+```{r, echo=FALSE, results='hide'}
+ROIs = c('antTH','midTH','pstTH')
+dTHinUnique <- data.frame() 
+dTHoutUnique <- data.frame() 
+
+for(roi in ROIs){
+
+dinUnique_roi<- d0 %>% filter(JP_label_in != roi & JP_label_out == roi) %>% 
+  mutate(elec_ID = paste(subject, record_chan)) %>% select(aSubID, elec_ID, JP_label_in) %>% filter(!duplicated(elec_ID))
+dTHinUnique <- rbind(dTHinUnique, dinUnique_roi)
+
+doutUnique_roi <- d0 %>% filter(JP_label_in == roi & JP_label_out != roi) %>% 
+  mutate(elec_ID = paste(subject, stim_chan)) %>% select(aSubID, elec_ID, JP_label_out) %>% filter(!duplicated(elec_ID))
+dTHoutUnique <- rbind(dTHoutUnique, doutUnique_roi)
+
+# recording channels is thalamus - outflow pathway
+xtable <- CrossTable(dinUnique_roi$JP_label_in, dinUnique_roi$aSubID, prop.t=TRUE, prop.r=TRUE, prop.c=TRUE)
+xt = xtable$t
+xt = xt[order(match(row.names(xt), anatomy_order)), ]
+# 
+# kable(xt, "latex", booktabs = T)%>%
+#   kable_styling(latex_options = c('basic', "scale_down")) %>%
+#   as_image(width=6, file = paste0('Elec_coverage/', roi, '_Count_breakDown_table_rec_channels_outflow.png'))
+write.csv(xt, paste0('Elec_coverage/', roi, '_Count_breakDown_table_rec_channels_outflow.csv'))
+# 
+# stim channels is thalamus - outflow pathway
+xtable <- CrossTable(doutUnique_roi$JP_label_out, doutUnique_roi$aSubID, prop.t=TRUE, prop.r=TRUE, prop.c=TRUE)
+xt = xtable$t
+xt = xt[order(match(row.names(xt), anatomy_order)), ]
+# 
+# kable(xt, "latex", booktabs = T)%>%
+#   kable_styling(latex_options = c('basic', "scale_down")) %>%
+#   as_image(width=6, file = paste0('Elec_coverage/', roi, '_Count_breakDown_table_stim_channels_inflow.png'))
+write.csv(xt, paste0('Elec_coverage/', roi, '_Count_breakDown_table_stim_channels_inflow.csv'))
+
+}
+```
+
+
+### Plot electrode coverage across JP_label, for paris that involves thalamus
+
+```{r total coverage, fig.width=9, fig.height=4}
+intable <- table(dTHinUnique$JP_label_in)
+outtable <- table(dTHoutUnique$JP_label_out)
+freqt <- rbind( outtable, intable)
+jp_labels <- colnames(freqt)
+# barplot(freqt, beside = TRUE, col = c("azure2","azure4"))
+# legend('topright', c('recorded', 'stimulated'), fill = c("azure2","azure4"), las=2)
+# xlab('JP_label category')
+# ylab('Count of contacts')
+
+indf <- as.data.frame(names(intable))
+names(indf) <- 'JP_label'
+indf$freq <- as.numeric(intable)
+indf$type <- 'recorded'
+
+outdf <- as.data.frame(names(outtable))
+names(outdf) <- 'JP_label'
+outdf$freq <- as.numeric(outtable)
+outdf$type <- 'stimulated'
+
+# sort by type and JP_label
+freqdf <- arrange(rbind(indf, outdf), desc(type), JP_label) 
+freqdf$type <- factor(freqdf$type)
+
+freqdf_cumsum <- ddply(freqdf, "JP_label",
+                      transform, label_ypos=cumsum(freq))
+
+rank_order <- order(freqdf_cumsum$label_ypos[!duplicated(freqdf_cumsum$JP_label)], decreasing = TRUE)
+jplabel_origOrder <- freqdf_cumsum$JP_label[!duplicated(freqdf_cumsum$JP_label)]
+freqdf_cumsum$JP_label <- factor(freqdf_cumsum$JP_label,
+                                 # in the order of lobes: frontal, temporal, parietal, occipital, subcortical
+                                 levels = jplabel_origOrder[rank_order])
+
+ggplot(data=freqdf_cumsum, aes(x=JP_label, y=freq, fill=type))+
+  geom_bar(stat="identity")+ scale_fill_manual(values = c("#dedcdb","#a1a1a1"))+
+  geom_text(aes(y=label_ypos, label=freq), vjust=1.3, color="black",
+             size=3.0)+
+  labs(title='Group electrode coverage for SPES/CCEP', x='Brain Area', y='Count')+
+  theme_minimal()+ 
+  theme(axis.text.x = element_text(angle = 45, hjust=0.8, vjust=1),
+        text = element_text(size = 13))
+
+#Savage('~/Dropbox/Stanford_Matters/data/THAL/CCEP/Plots/explore2/Elec_coverage/Barplot_elec_coverage_thoughTH.png')
+```
+
+### Compare activation among thalamus divisions
+#### Downstream pathways
+
+```{r filter activated CCEP}
+pktimes <- data.matrix(d0[,grepl('pks_time_', names(d))])
+```
+
+```{r k-means clustering, fig.width=5, fig.height=4}
+pkvec = t(Reshape(pktimes, 1))
+dvec = pkvec[!is.na(pkvec)]
+set.seed(666)
+res.km <- kmeans(dvec, 3, nstart = 100)
+
+dc1 <- dvec[res.km$cluster==1]
+dc2 <- dvec[res.km$cluster==2]
+dc3 <- dvec[res.km$cluster==3]
+df <- data.frame(cluster = c(rep('cluster 2', length(dc1)),
+                         rep('cluster 1', length(dc2)),
+                         rep('cluster 3', length(dc3))
+                         ),
+                 pktimes = c(dc1, dc2, dc3)
+                 )
+
+colors <- viridis(3)
+ggplot(df, aes(x=pktimes, fill=cluster)) +
+  geom_histogram( color='#e9ecef', alpha=0.6, bins = 100, position='identity') +
+  scale_fill_viridis_d() + theme_bw() +
+theme(legend.position = c(0.8, 0.8))
+
+# add cluster label
+pkcluster <- pkvec
+pkcluster[!is.na(pkvec)] <- res.km$cluster
+pkcluster <- Reshape(pkcluster, size(pktimes)[1], size(pktimes)[2])
+incluster1 <- unique(which(pkcluster==1, arr.ind=TRUE)[,1])
+incluster2 <- unique(which(pkcluster==2, arr.ind=TRUE)[,1])  
+incluster3 <- unique(which(pkcluster==3, arr.ind=TRUE)[,1])  
+
+pk1 <- rep(NA, size(pktimes)[1] )
+pk2 <- rep(NA, size(pktimes)[1] )
+pk3 <- rep(NA, size(pktimes)[1] )
+pk1[incluster2] <- 1
+pk2[incluster1] <- 1 # the original 2 cluster is renamed to the "cluster 1" -> ordered in time
+pk3[incluster3] <- 1
+
+d0$pk1 <- pk1
+d0$pk2 <- pk2
+d0$pk3 <- pk3
+```
+## Early Peak
+
+```{r prepare activation/elec coverage frequency table for inflow and outflow pathways}
+# sort coverage
+ROIs <- c('antTH', 'midTH','pstTH')
+df_thal1 <- data.frame()
+for (roi in ROIs){
+# for anatomy frequency table of the elec coverage
+d_out <- d0 %>% filter(JP_label_out == roi & JP_label_in != roi) %>% mutate(JP_label = JP_label_in) #anterior thalamus outflow pathway
+d_in <- d0 %>% filter(JP_label_in ==roi & JP_label_out != roi) %>% mutate(JP_label = JP_label_out) #anterior thalamus inflow pathway
+freqt_out <- table(d_out$JP_label)
+freqt_in <- table(d_in$JP_label)
+df_Freq <- data.frame(JP_label= c(rownames(freqt_out), rownames(freqt_in)),
+                          Count_elecCov = c(as.numeric(freqt_out),  as.numeric(freqt_in)),
+                          pathway = c(rep('outflow', length(freqt_out)), rep('inflow', length(freqt_in)))
+                          )  
+# for anatomy frequency table of the elec activation
+dact_out <- d_out[d_out$pk1==1,]
+dact_in <- d_in[d_in$pk1==1,]
+freqt_out <- table(dact_out$JP_label)
+freqt_in <- table(dact_in$JP_label)
+df_actFreq <- data.frame(JP_label= c(rownames(freqt_out), rownames(freqt_in)),
+                          Count_activation = c(as.numeric(freqt_out),  as.numeric(freqt_in)),
+                          pathway = c(rep('outflow', length(freqt_out)), rep('inflow', length(freqt_in)))
+                          )  
+df <- merge(df_Freq, df_actFreq, by=c('JP_label', 'pathway')) %>% mutate(Percentage_activation = Count_activation/Count_elecCov,
+                                                                        ROI = roi)
+# order JP label
+for (jplabel in unique(df$JP_label)){
+  if (dim(df[df$pathway=='inflow' & df$JP_label==jplabel,])[1] == 0){
+    df <- rbind(df, data.frame(JP_label = jplabel, pathway = 'inflow', Count_elecCov =0, Count_activation=0, Percentage_activation=0,   ROI=roi))}
+  if (dim(df[df$pathway=='outflow' & df$JP_label==jplabel,])[1] ==0){
+    df <- rbind(df, data.frame(JP_label = jplabel, pathway = 'outflow', Count_elecCov =0, Count_activation=0, Percentage_activation=0,   ROI=roi))}
+}
+df <- df[order(df$'JP_label', df$'pathway'),]
+jplabel_origOrder <- df$JP_label[!duplicated(df$JP_label)]
+df_acum <- ddply(df, "JP_label",
+                      transform, cumsum_percentage=cumsum(Percentage_activation))
+rank_order <- order(df_acum$cumsum_percentage[duplicated(df_acum$JP_label)], decreasing = TRUE)
+df$JP_label <- factor(df$JP_label,
+                                 # in the order of lobes: frontal, temporal, parietal, occipital, subcortical
+                                 levels = jplabel_origOrder[rank_order])
+df_thal1 <- rbind(df_thal1, df)
+}
+
+```
+
+```{r plot activation percentage early peaks, fig.width=10, fig.height=6}
+#df_thal$ROI <- factor(df$ROI,levels = c('antTH', 'pstTH', 'midTH'))
+colors = c("#BD464F", "#EBB10D", "#11659A")
+
+ggplot(df_thal1, aes(x=factor(JP_label, levels = anatomy_order), y=Percentage_activation, fill=ROI, alpha = pathway))+
+  geom_bar( stat="identity", position=position_dodge(), width=0.7) +
+  geom_text(aes(label = Count_elecCov), vjust=-0.4, color="grey10",
+            position = position_dodge(0.8),
+             size=1.5)+
+  scale_alpha_discrete(range = c(0.5,1)) +
+  scale_fill_manual(values = colors) +
+  facet_wrap(~ROI, ncol = 1, scales="free_y") +
+ labs(title='Thalamus CCEP activation profile (early peak)', x='Brain Area', y='Percentage', fill = "pathway")+
+ theme_minimal() +
+    theme(axis.text.x = element_text(angle = 30, hjust=0.8, vjust=1),
+        text = element_text(size = 11))
+ 
+
+```
+
+## Late peak
+```{r }
+# sort coverage
+ROIs <- c('antTH', 'midTH','pstTH')
+df_thal2 <- data.frame()
+for (roi in ROIs){
+# for anatomy frequency table of the elec coverage
+d_out <- d0 %>% filter(JP_label_out == roi & JP_label_in != roi) %>% mutate(JP_label = JP_label_in) #anterior thalamus outflow pathway
+d_in <- d0 %>% filter(JP_label_in ==roi & JP_label_out != roi) %>% mutate(JP_label = JP_label_out) #anterior thalamus inflow pathway
+freqt_out <- table(d_out$JP_label)
+freqt_in <- table(d_in$JP_label)
+df_Freq <- data.frame(JP_label= c(rownames(freqt_out), rownames(freqt_in)),
+                          Count_elecCov = c(as.numeric(freqt_out),  as.numeric(freqt_in)),
+                          pathway = c(rep('outflow', length(freqt_out)), rep('inflow', length(freqt_in)))
+                          )  
+# for anatomy frequency table of the elec activation
+dact_out <- d_out[d_out$pk3==1,]
+dact_in <- d_in[d_in$pk3==1,]
+freqt_out <- table(dact_out$JP_label)
+freqt_in <- table(dact_in$JP_label)
+df_actFreq <- data.frame(JP_label= c(rownames(freqt_out), rownames(freqt_in)),
+                          Count_activation = c(as.numeric(freqt_out),  as.numeric(freqt_in)),
+                          pathway = c(rep('outflow', length(freqt_out)), rep('inflow', length(freqt_in)))
+                          )  
+df <- merge(df_Freq, df_actFreq, by=c('JP_label', 'pathway')) %>% mutate(Percentage_activation = Count_activation/Count_elecCov,
+                                                                        ROI = roi)
+# order JP label
+for (jplabel in unique(df$JP_label)){
+  if (dim(df[df$pathway=='inflow' & df$JP_label==jplabel,])[1] == 0){
+    df <- rbind(df, data.frame(JP_label = jplabel, pathway = 'inflow', Count_elecCov =0, Count_activation=0, Percentage_activation=0,   ROI=roi))}
+  if (dim(df[df$pathway=='outflow' & df$JP_label==jplabel,])[1] ==0){
+    df <- rbind(df, data.frame(JP_label = jplabel, pathway = 'outflow', Count_elecCov =0, Count_activation=0, Percentage_activation=0,   ROI=roi))}
+}
+df <- df[order(df$'JP_label', df$'pathway'),]
+jplabel_origOrder <- df$JP_label[!duplicated(df$JP_label)]
+df_acum <- ddply(df, "JP_label",
+                      transform, cumsum_percentage=cumsum(Percentage_activation))
+rank_order <- order(df_acum$cumsum_percentage[duplicated(df_acum$JP_label)], decreasing = TRUE)
+df$JP_label <- factor(df$JP_label,
+                                 # in the order of lobes: frontal, temporal, parietal, occipital, subcortical
+                                 levels = jplabel_origOrder[rank_order])
+df_thal2 <- rbind(df_thal2, df)
+}
+```
+
+
+
+```{r plot activation percentage latepeaks, fig.width=10, fig.height=6}
+colors = c("#BD464F", "#EBB10D", "#11659A")
+
+ggplot(df_thal2,aes(x=factor(JP_label, levels = anatomy_order), y=Percentage_activation, fill=ROI, alpha = pathway))+
+  geom_bar( stat="identity", position=position_dodge(), width=0.7) +
+  geom_text(aes(label = Count_elecCov), vjust=-0.6, color="grey10",
+            position = position_dodge(0.8),
+             size=1.5)+
+  scale_alpha_discrete(range = c(0.5,1)) +
+  scale_fill_manual(values = colors) +
+  facet_wrap(~ROI, ncol = 1, scales="free_y") +
+ labs(title='Thalamus CCEP activation profile (late peak)', x='Brain Area', y='Percentage', fill = "pathway")+
+ theme_minimal() +
+    theme(axis.text.x = element_text(angle = 30, hjust=0.8, vjust=1),
+        text = element_text(size = 11))
+```
+### Plot in different ways
+#### Early peaks
+```{r, fig.width=13, fig.height=6}
+
+ggplot(df_thal1,aes(x=factor(JP_label, levels = anatomy_order), y=Percentage_activation, fill=ROI, alpha = pathway))+
+  geom_bar( stat="identity", position=position_dodge(), width=0.7) +
+  geom_text(aes(label = Count_elecCov), vjust=-0.4, color="grey10",
+            position = position_dodge(0.8),
+             size=1.5)+
+  scale_alpha_discrete(range = c(0.7,1)) +
+  scale_fill_manual(values = colors) +
+  facet_wrap(~pathway, ncol = 1, scales="free_y") +
+ labs(title='Thalamus CCEP activation profile (early peak)', x='Brain Area', y='Percentage', fill = "pathway")+
+ theme_minimal() +
+    theme(axis.text.x = element_text(angle = 30, hjust=0.8, vjust=1),
+        text = element_text(size = 11))
+
+```
+#### Late peaks
+```{r, fig.width=13, fig.height=6}
+
+ggplot(df_thal2,aes(x=factor(JP_label, levels = anatomy_order), y=Percentage_activation, fill=ROI, alpha = pathway))+
+  geom_bar( stat="identity", position=position_dodge(), width=0.7) +
+  geom_text(aes(label = Count_elecCov), vjust=-0.6, color="grey10",
+            position = position_dodge(0.8),
+             size=1.5)+
+  scale_alpha_discrete(range = c(0.7,1)) +
+  scale_fill_manual(values = colors) +
+  facet_wrap(~pathway, ncol = 1, scales="free_y") +
+ labs(title='Thalamus CCEP activation profile (late peak)', x='Brain Area', y='Percentage', fill = "pathway")+
+ theme_minimal() +
+    theme(axis.text.x = element_text(angle = 30, hjust=0.8, vjust=1),
+        text = element_text(size = 11))
+
+```
+
+
+
+## Select brain areas for statistical testing
+
+
+```{r}
+Area <- data.frame(JP_label = c(), nSubs = c(), nElec = c()) # good for doing mixed design, interaction effect, when nSub > 1
+Area1 <- data.frame(JP_label = c(), nSubs = c(), nElec = c()) # good for doing mixed design for antTh and pstTh comparison in outflow pathway
+Area2 <- data.frame(JP_label = c(), nSubs = c(), nElec = c()) # good for doing mixed design for antTh and pstTh comparison in inflow pathway
+
+commonSbList <- matrix(list(), length(JP_label),1)
+commonSbList1 <- matrix(list(), length(JP_label),1)
+commonSbList2 <- matrix(list(), length(JP_label),1)
+
+t1 <- read.csv('/media/lvdian/Dropbox/Stanford_Matters/data/THAL/COHORT/Plots/Elec_coverage/antTH_Count_breakDown_table_rec_channels_outflow.csv')
+t2 <- read.csv('/media/lvdian/Dropbox/Stanford_Matters/data/THAL/COHORT/Plots/Elec_coverage/antTH_Count_breakDown_table_stim_channels_inflow.csv')
+t3 <- read.csv('/media/lvdian/Dropbox/Stanford_Matters/data/THAL/COHORT/Plots/Elec_coverage/pstTH_Count_breakDown_table_rec_channels_outflow.csv')
+t4 <- read.csv('/media/lvdian/Dropbox/Stanford_Matters/data/THAL/COHORT/Plots/Elec_coverage/pstTH_Count_breakDown_table_stim_channels_inflow.csv')
+n <- 0
+for (jplabel in JP_label){
+  n <- n + 1
+ e1 <- t1[t1[,1]==jplabel, t1[t1[,1]==jplabel,]>3] # at least 3 electrodes
+ if (length(e1[-1]) == 0) {e1 = 0} else {e1 = e1[-1]}
+ s1 <- colnames(e1)
+ 
+  e2 <- t2[t2[,1]==jplabel, t2[t2[,1]==jplabel,]>3]
+   if (length(e2[-1]) == 0) {e2 = 0} else {e2 = e2[-1]}
+  s2 <- colnames(e2)
+  
+   e3 <- t3[t3[,1]==jplabel, t3[t3[,1]==jplabel,]>3]
+    if (length(e3[-1]) == 0) {e3 = 0} else {e3 = e3[-1]}
+   s3 <- colnames(e3)
+   
+    e4 <- t4[t4[,1]==jplabel, t4[t4[,1]==jplabel,]>3]
+     if (length(e4[-1]) == 0) {e4 = 0} else {e4 = e4[-1]}
+    s4 <- colnames(e4)
+    
+   commonS  = intersect(intersect(s1,s2), intersect(s3,s4))
+   commonS1 = intersect(s1,s3)
+   commonS2 = intersect(s2,s4)
+   
+   commonSbList[[n]] = commonS
+   commonSbList1[[n]] = commonS1
+   commonSbList2[[n]] = commonS2
+   
+  Area <- rbind(Area, data.frame(JP_label = jplabel,  nSubs = length(commonS), 
+                                 nElec = sum(e1) + sum(e2) + sum(e3) + sum(e4)))
+  
+  Area1 <- rbind(Area1, data.frame(JP_label = jplabel,  nSubs = length(commonS1), 
+                                 nElec = sum(e1)+ sum(e3)))
+                                 
+  Area2 <- rbind(Area2, data.frame(JP_label = jplabel,  nSubs = length(commonS2), 
+                                 nElec = sum(e2) + sum(e4)))
+  
+}
+
+
+```
+
+### Group level: Comparing antTh and pstTh inflow pathways
+
+```{r}
+df_thal <- rbind(df_thal1 %>% mutate(peakCluster = 'early'), df_thal2 %>% mutate(peakCluster = 'late'))
+
+fprintf('Testing for %s...', area)
+model <- aov(Percentage_activation ~ ROI *peakCluster*pathway + 1, df_thal)
+summary(model)
+tukeyResult <- TukeyHSD(model, conf.level=0.95)
+tukeyResult
+cmpInterest <- c('antTH:early:outflow-antTH:early:inflow',
+                 'pstTH:early:outflow-pstTH:early:inflow',
+                 'antTH:late:outflow-antTH:late:inflow',
+                 'pstTH:late:outflow-pstTH:late:inflow',
+                 'pstTH:early:outflow-antTH:early:outflow',
+                 'pstTH:early:inflow-antTH:early:inflow',
+                 'pstTH:late:outflow-antTH:late:outflow',
+                 'pstTH:late:inflow-antTH:late:inflow'
+                 )
+tukeyResult$`ROI:peakCluster:pathway`[rownames(tukeyResult$`ROI:peakCluster:pathway`) %in% cmpInterest,]
+```
+Conclusion: The three thalamus subdivisions have similar excitibilities with respect to the whole-brain, as the activation percentage averaged across brain areas do not differ among the 3 ROIs, either in inflow or outflow pathways, either in early or late post-stim phases. It is true for all the 3 ROIs that there are more activations in early than late pahses, there are slightly more outflow activations than inflow activations (marginally significant). Only in late post-stim phase, there are much more outflow pathway than inflow pathway activations for pstTH, but it is not true for antTH.
+
+### Test for activation pattern differences
+```{r}
+Perc_CAT <- data.frame(category=c(), Percentage_activation=c(), JP_label = c())
+for (timing in c('early', 'late')){
+for (path in c('inflow', 'outflow')){
+for (roi in c('antTH', 'midTH', 'pstTH')){
+  df <- df_thal %>% filter(ROI == roi, pathway == path, peakCluster == timing)
+  Perc_CAT <- rbind(Perc_CAT, data.frame(category=sprintf('%s:%s:%s', roi, timing, path), 
+                                         Percentage_activation=df$Percentage_activation, JP_label = df$JP_label))
+}}}
+cmpInterest <- c('antTH:early:outflow-antTH:early:inflow',
+                 'pstTH:early:outflow-pstTH:early:inflow',
+                 'antTH:late:outflow-antTH:late:inflow',
+                 'pstTH:late:outflow-pstTH:late:inflow',
+                 'pstTH:early:outflow-antTH:early:outflow',
+                 'pstTH:early:inflow-antTH:early:inflow',
+                 'pstTH:late:outflow-antTH:late:outflow',
+                 'pstTH:late:inflow-antTH:late:inflow'
+                 )
+actPerc_Corr <- data.frame(comparison=c(), correlation=c(), pvalue = c())
+
+for (cat in cmpInterest){
+  keys = str_split_1(cat, '-')
+  cat1 = keys[1]
+  cat2 = keys[2]
+  perc1 = Perc_CAT[Perc_CAT$category==cat1,]
+  perc2 = Perc_CAT[Perc_CAT$category==cat2,]
+  jplabels = intersect(perc1$JP_label, perc2$JP_label)
+  perc1 = perc1[match(jplabels, perc1$JP_label),]
+  perc2 = perc2[match(jplabels, perc2$JP_label),]
+  res<- cor.test(perc1$Percentage_activation, perc2$Percentage_activation)
+  actPerc_Corr <- rbind(actPerc_Corr,
+                        data.frame(comparison=cat, correlation=res$estimate, pvalue = res$p.value))
+}
+
+actPerc_Corr$p_adj <- p.adjust(actPerc_Corr$pvalue)
+```
+
+Correlations of brain regional activation percentages between antTH and pstTH:
+Only the early activation in the outflow pathways are similar between them (p.adj = 0.00225), otherwise they were not similar. Note, without correcting for multiple comparison, the late activation patterns in the outflow pathways have a correlation coefficient of 0.48 p = 0.034, but the p increases to 0.24 after adjustment. The rest of the correlations of the activation patterns are all below 0.25 (p>0.4, p.adj>0.99), meaning the antTH and pstTH have distinct inflow pathways in both early and late post-stim phases, and the inflow and outflow pathways are distinct for both antTH and pstTH.
+
+### Inidividual level:
+
+```{r}
+# reorganize data
+ROIs = c('antTH','midTH','pstTH')
+dTH <- data.frame()
+
+for(roi in ROIs){
+
+din_roi<- d0 %>% filter(JP_label_in != roi & JP_label_out == roi) %>% 
+  mutate(elec_ID = paste(subject, record_chan), JP_label = JP_label_in, Net1 = Yeo7_in1, Net2 = Yeo7_in2, pathway = 'outflow', ROI = roi) %>% 
+  select(subject, aSubID, ROI, pathway, elec_ID, JP_label,osc_speed, min_pk_time, Net1, Net2, activated, activated_default, activated_simpRule, CECS, CECS_activation, pk1, pk2, pk3) 
+
+dout_roi <- d0 %>% filter(JP_label_in == roi & JP_label_out != roi) %>% 
+  mutate(elec_ID = paste(subject, stim_chan), JP_label = JP_label_out, Net1 = Yeo7_out1, Net2 = Yeo7_out2, pathway = 'inflow', ROI = roi) %>% 
+  select(subject, aSubID, ROI,pathway, elec_ID, JP_label, osc_speed, min_pk_time, Net1, Net2, activated, activated_default, activated_simpRule, CECS, CECS_activation, pk1, pk2, pk3) 
+
+dTH <- rbind(dTH, din_roi, dout_roi)  
+}
+```
+
+
+```{r outflow pathway, individual test}
+area1<- Area1$JP_label[Area1$nSubs >= 2]
+
+for (jplabel in area1){
+path = 'outflow'
+print('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
+fprintf('Statistics for CECS score in the %s pathway CCEP to %s between antTH and pstTH.\n', path, jplabel)
+sbjs <- unlist(commonSbList1[which(Area1$JP_label == jplabel)])
+dTH_ <- dTH %>% filter(aSubID %in% sbjs & JP_label==jplabel & ROI!='midTH' & pathway==path)
+ml0 <- lmer(CECS ~  1|subject, dTH_)
+ml <- lmer(CECS ~  ROI+1|subject, dTH_)
+
+print(anova(ml0, ml))
+
+}
+```
+```{r inflow pathway, individual test}
+area2<- Area2$JP_label[Area2$nSubs >= 2]
+for (jplabel in area2){
+path = 'inflow'
+print('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
+fprintf('Statistics for CECS score in the %s pathway CCEP from %s between antTH and pstTH.\n', path, jplabel)
+sbjs <- unlist(commonSbList2[which(Area2$JP_label == jplabel)])
+dTH_ <- dTH %>% filter(aSubID %in% sbjs & JP_label==jplabel & ROI!='midTH' & pathway==path)
+ml0 <- lmer(CECS ~  1|subject, dTH_)
+ml <- lmer(CECS ~  ROI+1|subject, dTH_)
+
+print(anova(ml0, ml))
+
+}
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#### plot the inflow and outflow pathways separately:
+
+```{r, fig.width=3.5, fig.height=1.8}
+
+df_percent_pmc_target$pathway <- 'downstream'
+df_percent_pmc_source$pathway <- 'upstream'
+df_percent_pmc_target_hot <- df_percent_pmc_target  %>% filter(EBS_type == 'hot')
+df_percent_pmc_source_hot <- df_percent_pmc_source %>% filter(EBS_type == 'hot')
+
+rank_order_inflow <- order(df_percent_pmc_source_hot$percentage[!duplicated(df_percent_pmc_source_hot$JP_label)], decreasing = FALSE)
+rank_order_outflow <- order(df_percent_pmc_target_hot$percentage[!duplicated(df_percent_pmc_target_hot$JP_label)], decreasing = FALSE)
+
+jplabel_origOrder_inflow <- df_percent_pmc_source_hot$JP_label[!duplicated(df_percent_pmc_source_hot$JP_label)]
+jplabel_origOrder_outflow <- df_percent_pmc_target_hot$JP_label[!duplicated(df_percent_pmc_target_hot$JP_label)]
+
+
+df_percent_pmc_source_hot <- df_percent_pmc_source_hot %>% 
+  mutate ( JP_label = factor(JP_label,
+   levels = jplabel_origOrder_inflow[rank_order_inflow]))
+
+df_percent_pmc_target_hot<- df_percent_pmc_target_hot %>% 
+  mutate ( JP_label = factor(JP_label,
+  levels = jplabel_origOrder_outflow[rank_order_outflow]))
+
+# ============================= plot ====================================
+#pdf('/Users/dianlyu/Dropbox/Stanford_Matters/data/SELF/Plots/HotElec_inflow_outflow_activaitonPerc_CCEP.pdf', height = 3.5, width = 12)
+p1<- ggplot(df_percent_pmc_target_hot, aes(x=JP_label, y=percentage))+
+  geom_bar(aes(fill=percentage), stat="identity", position=position_dodge(width = 0.15), width=0.65)+ 
+  #scale_fill_manual(values = c(hot_col, cold_col), labels = c('to Hot', 'to Cold'))+
+  scale_fill_gradient(low='black',high=hot_col2)+
+  geom_text(aes(label = act_count), hjust=1.2,  
+            color="grey35",
+            position = position_dodge(width = 0.85),
+             size=2.0)+
+labs( title='Outflow Pathways', x='Brain Area', y='Percentage (%)')+
+  scale_y_reverse( breaks = seq(70.0, 0.0, -10.0), limits = c(50,0), expand = expansion(mult= c(c(0.05,0.01)))) +
+  theme_bw()+ 
+  coord_flip() + 
+  theme(text = element_text(size = 12),legend.position="none", plot.title = element_text(hjust = 0.5),
+        panel.spacing.x = unit(0, "mm"),
+        plot.margin = unit(c(5.5, 0, 5.5, 5.5), "pt"))
+
+p1
+ggsave('/Users/dl577/Dropbox/Stanford_Matters/data/SELF/Plots/HotElec_outflow_activaitonPerc_CCEP2.pdf', p1)
+
+#===========================================================================
+p2<-ggplot(df_percent_pmc_source_hot, aes(x=JP_label, y=percentage))+
+  geom_bar( aes(fill=percentage), stat="identity", position=position_dodge(width = 0.15), width=0.65)+ 
+  #scale_fill_manual(values = c(hot_col, cold_col), labels = c('from Hot', 'from Cold'))+
+  scale_fill_gradient(low='black',high=hot_col2)+
+  geom_text(aes(label = act_count), hjust=-0.4,  
+            color="grey35",
+            position = position_dodge(width = 0.85),
+             size=2.0) +
+  scale_y_continuous( breaks = seq(0.0, 60.0, 10.0) , limits = c(0,50), expand = expansion(mult= c(c(0.01, 0.05)))) +
+  scale_x_discrete( position = 'top') +
+  coord_flip() +
+ labs(title='Inflow Pathways', y='Percentage (%)')+
+  theme_bw()+ 
+  theme(text = element_text(size = 12),legend.position="none", axis.title.y=element_blank(),
+        plot.title = element_text(hjust = 0.5),
+        panel.spacing.x = unit(0, "mm"),
+        plot.margin = unit(c(5.5, 0, 5.5, 5.5), "pt")
+        
+        )
+
+p2
+ggsave('/Users/dl577/Dropbox/Stanford_Matters/data/SELF/Plots/HotElec_inflow_activaitonPerc_CCEP2.pdf', p2)
+# combine two plots
+#grid.newpage()
+#grid.draw(cbind(ggplotGrob(p2), ggplotGrob(p1), size = "last"))
+## Stop writing to the PDF file
+#dev.off()
+```
+
+
+### Present both downstream and upstream pathways in one plot
+
+```{r, fig.width=6, fig.height=5}
+df_percent_pmc_target$pathway <- 'downstream'
+df_percent_pmc_source$pathway <- 'upstream'
+df_percent_pmc <- rbind(df_percent_pmc_source,df_percent_pmc_target)
+## rank order
+df_percent_pmc_cumsum <- ddply(df_percent_pmc, "JP_label",
+                      transform, cumsum_percentage=cumsum(percentage))
+
+rank_order <- order(df_percent_pmc_cumsum$cumsum_percentage[!duplicated(df_percent_pmc_cumsum$JP_label)], decreasing = FALSE)
+
+jplabel_origOrder <- df_percent_pmc_cumsum$JP_label[!duplicated(df_percent_pmc_cumsum$JP_label)]
+df_percent_pmc_cumsum$JP_label <- factor(df_percent_pmc_cumsum$JP_label,
+                                 # in the order of lobes: frontal, temporal, parietal, occipital, subcortical
+                                 levels = jplabel_origOrder[rank_order])
+
+
+df_percent_pmc_source_cumsum2 <- df_percent_pmc_source_cumsum %>% 
+  mutate ( JP_label = factor(JP_label,
+   levels = jplabel_origOrder[rank_order]))
+
+df_percent_pmc_target_cumsum2 <- df_percent_pmc_target_cumsum %>% 
+  mutate ( JP_label = factor(JP_label,
+  levels = jplabel_origOrder[rank_order]))
+
+# ============================= plot ====================================
+pdf('/Users/dianlyu/Dropbox/Stanford_Matters/data/SELF/Plots/inflow_outflow_activaitonPerc_CCEP.pdf', height = 7.5, width = 10)
+
+p1<-ggplot(df_percent_pmc_target_cumsum2, aes(x=JP_label, y=percentage, fill=EBS_type))+
+  geom_bar(stat="identity", position=position_dodge(width = 0.85), width=0.75)+ 
+  scale_fill_manual(values = c(hot_col, cold_col), labels = c('from Hot', 'from Cold'))+
+  geom_text(aes(label = act_count), hjust=-0.4,  
+            color="grey35",
+            position = position_dodge(width = 0.85),
+             size=2.0) +
+  scale_y_continuous( breaks = seq(0.0, 80.0, 20.0) ,expand = expansion(mult= c(c(0, 0.05)))) +
+  ylim(0,70)+
+  coord_flip() +
+ labs(title='Outflow Pathways', y='Percentage (%)',fill = "EBS type")+
+  theme_bw()+ 
+  theme(text = element_text(size = 12),legend.position="top", plot.title = element_text(hjust = 0.5),
+        panel.spacing.x = unit(0, "mm"), axis.title.y=element_blank(), axis.text.y=element_blank(),
+        axis.line.y = element_blank(), axis.ticks.y=element_blank(),
+        plot.margin = unit(c(5.5, 5.5, 5.5, -3.5), "pt")
+        )
+
+p2<- ggplot(df_percent_pmc_source_cumsum2, aes(x=JP_label, y=percentage, fill=EBS_type))+
+  geom_bar(stat="identity", position=position_dodge(width = 0.85), width=0.75)+ 
+  scale_fill_manual(values = c(hot_col, cold_col), labels = c('to Hot', 'to Cold'))+
+  geom_text(aes(label = act_count), hjust=1.2,  
+            color="grey35",
+            position = position_dodge(width = 0.85),
+             size=2.0)+
+labs( title='Inflow Pathways', x='Brain Area', y='Percentage (%)', fill = "EBS type")+
+  scale_y_reverse( breaks = seq(80.0, 0.0, -20.0), expand = expansion(mult= c(c(0.05,0)))) +
+  ylim(70,0)+
+  theme_bw()+ 
+  coord_flip() + 
+  theme(text = element_text(size = 12),legend.position="top", plot.title = element_text(hjust = 0.5),
+        panel.spacing.x = unit(0, "mm"),
+        plot.margin = unit(c(5.5, 0, 5.5, 5.5), "pt"))
+
+# combine two plots
+grid.newpage()
+grid.draw(cbind(ggplotGrob(p2), ggplotGrob(p1), size = "last"))
+## Stop writing to the PDF file
+dev.off()
+```
+
+
+
+### Examine correlation between activation count and time-to-1st-peak
+
+#### Summary table
+```{r}
+EBS_type = c('hot', 'cold')
+pathways = c('downstream', 'upstream')
+d_pmc = data.frame() #TTF_mean, TTF_std, TTF_median, TTF_min, TTF_max, JP_label, EBS_type, pathway
+for (ie in c(1,-1)){
+  for (pw in pathways){
+    
+    des_jp <- matrix(nrow = length(jp_labels), ncol = 10) # mean, std, median, min, max
+ # rownames(des_jp) <- jp_labels
+for (jplabel in jp_labels){
+  
+  if (pw == 'downstream'){
+  d_tmp <- d_act[d_act$JP_label_in == jplabel & d_act$JP_label_out == 'PMC' & d_act$stim_hot==ie, ] }
+ else {
+  d_tmp <- d_act[d_act$JP_label_out == jplabel & d_act$JP_label_in == 'PMC' & d_act$record_hot==ie,]}
+  
+  d_tmp <- d_tmp[!is.nan(d_tmp$pks_time_1)& !is.na(d_tmp$pks_time_1),]
+  d_tmp$pks_time_1_log2 <- log2(d_tmp$pks_time_1)
+  
+  des_jp[which(jp_labels==jplabel),] <- c(mean(d_tmp$pks_time_1_log2, na.rm = TRUE), 
+                        sd(d_tmp$pks_time_1_log2, na.rm = TRUE), 
+                        median(d_tmp$pks_time_1_log2, na.rm = TRUE), 
+                        min(d_tmp$pks_time_1_log2, na.rm = TRUE), 
+                        max(d_tmp$pks_time_1_log2, na.rm = TRUE),
+                        
+                        mean(d_tmp$pks_time_1, na.rm = TRUE), 
+                        sd(d_tmp$pks_time_1, na.rm = TRUE), 
+                        median(d_tmp$pks_time_1, na.rm = TRUE), 
+                        min(d_tmp$pks_time_1, na.rm = TRUE), 
+                        max(d_tmp$pks_time_1, na.rm = TRUE))
+}
+  # combine data frame
+ 
+  df_tmp <- data.frame(TTFlog_mean=des_jp[,1], TTFlog_std=des_jp[,2],TTFlog_median=des_jp[,3],TTFlog_min=des_jp[,4],TTFlog_max=des_jp[,5],
+                       TTF_mean=des_jp[,6], TTF_std=des_jp[,7],TTF_median=des_jp[,8],TTF_min=des_jp[,9],TTF_max=des_jp[,10],
+                       JP_label = jp_labels)
+  df_tmp$EBS_type <- EBS_type[((-1.*ie)+3)/2]
+  df_tmp$pathway <- pw
+  d_pmc = rbind(df_tmp, d_pmc)
+}
+}
+
+```
+
+```{r, fig.width=5, fig.height=3}
+# merge data
+df_pmc_merged <- merge(df_percent_pmc_cumsum, d_pmc, by = c('JP_label','EBS_type','pathway'))
+df_pmc_merged$EBS_type = factor(df_pmc_merged$EBS_type , levels = c('hot', 'cold'))
+df_pmc_merged$pathway = factor(df_pmc_merged$pathway , levels = c('upstream', 'downstream'))
+df_pmc_merged <- df_pmc_merged[!is.na(df_pmc_merged$TTF_mean) & !is.nan(df_pmc_merged$TTF_mean), ]
+
+ggplot(df_pmc_merged, aes(x=TTF_median, y=percentage, size=elec_count, fill=EBS_type)) +
+    geom_point(alpha=0.5, shape=21, color="black") +
+ stat_smooth(aes(color=EBS_type), method='lm', #formula = percentage~TTFlog_mean,
+            se=FALSE, size=0.5) +
+    scale_size(range = c(1, 12), name="Local electrode count") +
+  facet_wrap(~pathway, ncol=2) +
+  scale_x_continuous(trans='log2')+
+    theme_ipsum( base_size = 13, plot_title_size = 16, plot_title_margin = 12) +
+    theme(legend.position="bottom", text = element_text(size = 14)) +
+labs(title='Correlation between activation and time-to-first-peak (TTFP)', x = 'TTFP (ms)', y='Local percentage of activation (%)')
+
+```
+
+```{r, echo = TRUE}
+#check pearson correlation
+x<- df_pmc_merged$TTFlog_mean[df_pmc_merged$EBS_type=='hot'& df_pmc_merged$pathway=='upstream']
+y<- df_pmc_merged$percentage[df_pmc_merged$EBS_type=='hot'& df_pmc_merged$pathway=='upstream']
+
+r <- cor.test(x,y, use = "complete.obs")
+r
+
+x<- df_pmc_merged$TTFlog_mean[df_pmc_merged$EBS_type=='cold'& df_pmc_merged$pathway=='upstream']
+y<- df_pmc_merged$percentage[df_pmc_merged$EBS_type=='cold'& df_pmc_merged$pathway=='upstream']
+r <- cor.test(x,y, use = "complete.obs")
+r
+
+x<- df_pmc_merged$TTFlog_mean[df_pmc_merged$EBS_type=='hot'& df_pmc_merged$pathway=='downstream']
+y<- df_pmc_merged$percentage[df_pmc_merged$EBS_type=='hot'& df_pmc_merged$pathway=='downstream']
+r <- cor.test(x,y, use = "complete.obs")
+r
+
+x<- df_pmc_merged$TTFlog_mean[df_pmc_merged$EBS_type=='cold'& df_pmc_merged$pathway=='downstream']
+y<- df_pmc_merged$percentage[df_pmc_merged$EBS_type=='cold'& df_pmc_merged$pathway=='downstream']
+r <- cor.test(x,y, use = "complete.obs")
+r
+```
+
+
+### Compare Time-to-1st-peak between hot and cold electrodes
+#### Downstream pathways
+
+```{r 1st peak time for pmc downstream}
+d_pmc1 <- d_act %>% filter(stim_hot %in% c(1, -1)) %>% 
+  mutate(EBS_type = case_when(stim_hot == 1 ~ "hot",
+                              stim_hot == -1 ~ "cold")) %>% 
+  mutate(pks_time_1_log2 = log2(pks_time_1))
+
+
+## rank order
+st<-d_pmc1 %>% group_by(JP_label_in) %>% summarize(Groupmedian_TTFP = median(pks_time_1))
+jporder <- st$JP_label_in [order(st$Groupmedian_TTFP, decreasing = FALSE)]
+## fine tune order based on the hot electrodes ttf
+st<-d_pmc1 %>% filter(stim_hot==1) %>% group_by(JP_label_in) %>% summarize(Groupmedian_TTFP = median(pks_time_1))
+jporder1 <- st$JP_label_in [order(st$Groupmedian_TTFP, decreasing = FALSE)]
+cold_order <- setdiff(jporder, jporder1)
+jporder <- c(jporder1, cold_order)
+
+d_pmc1$JP_label_in <-  factor(d_pmc1$JP_label_in,
+                            levels = jporder)
+
+compare_means(pks_time_1_log2 ~ EBS_type, data = d_pmc1, p.adjust.method = "fdr",
+              group.by = "JP_label_in")
+
+```
+
+```{r, fig.width=8, fig.height=3}
+
+d_pmc1 <-d_pmc1 %>% mutate ("EBS type" = factor(case_when(EBS_type == 'hot' ~ 'from Hot',
+                                                     EBS_type == 'cold' ~ 'from Cold'),
+                                                  levels = c('from Hot', 'from Cold'))
+                              ) 
+
+p <- ggboxplot(d_pmc1, x = "JP_label_in", y = "pks_time_1",
+          color = "EBS type", palette = c("#FC4E07", "#00AFBB"),# red, blue
+          add = "jitter", add.params = list(size=1.2, alpha=0.3),
+          size = 0.6, width = 0.5, #
+          outlier.size = 0.4
+         # facet.by = "JP_label_in", short.panel.labs = TRUE
+         ) +
+  theme(axis.text.x = element_text(angle = 45, hjust=0.8, vjust=0.8),
+        text = element_text(size = 14))+
+  scale_y_continuous(trans='log2') + labs(y = 'Time to first peak (ms)', x = 'Brain Area')
+# Use only p.format as label. Remove method name.
+p + stat_compare_means(aes(group = EBS_type, label = sprintf("p = %1.2f", as.numeric(..p.format..))))
+
+```
+
+#### Uptream pathways
+
+```{r 1st peak time for pmc upstream}
+d_pmc2 <- d_act %>% filter(record_hot %in% c(1, -1)) %>% 
+  mutate(EBS_type = case_when(record_hot == 1 ~ "hot",
+                              record_hot == -1 ~ "cold")) %>% 
+  mutate(pks_time_1_log2 = log2(pks_time_1))
+## rank order
+st<-d_pmc2  %>% group_by(JP_label_out) %>% summarize(Groupmedian_TTFP = median(pks_time_1))
+jporder <- st$JP_label_out [order(st$Groupmedian_TTFP, decreasing = FALSE)]
+
+d_pmc2$JP_label_out <- factor(d_pmc2$JP_label_out,
+                            levels = jporder)
+
+
+compare_means(pks_time_1_log2 ~ EBS_type, data = d_pmc2, p.adjust.method = "fdr",
+              group.by = "JP_label_out")
+
+```
+
+```{r, fig.width=8, fig.height=3}
+
+d_pmc2 <-d_pmc2 %>% mutate ("EBS type" = factor(case_when(EBS_type == 'hot' ~ 'to Hot',
+                                                     EBS_type == 'cold' ~ 'to Cold'),
+                                                  levels = c('to Hot', 'to Cold')))
+
+p <- ggboxplot(d_pmc2, x = "JP_label_out", y = "pks_time_1",
+          color = "EBS type", palette = c("#FC4E07", "#00AFBB"),# red, blue
+          add = "jitter", add.params = list(size=1.2, alpha=0.3),
+          size = 0.6, width = 0.5, #
+          outlier.size = 0.4
+         # facet.by = "JP_label_in", short.panel.labs = TRUE
+         ) +
+  theme(axis.text.x = element_text(angle = 45, hjust=0.8, vjust=0.8),
+        text = element_text(size = 14))+
+  scale_y_continuous(trans='log2') + labs(y = 'Time to first peak (ms)', x = 'Brain Area')
+# Use only p.format as label. Remove method name.
+p + stat_compare_means(aes(group = EBS_type, label = sprintf("p = %1.2f", as.numeric(..p.format..))))
+
+```
+
+
+
+
+
+### Compare number of peaks between hot and cold electrodes
+#### Downstream pathways
+
+```{r number of peaks for pmc downstream}
+d_pmc1 <- d_act %>% filter(stim_hot %in% c(1, -1)) %>% 
+  mutate(EBS_type = case_when(stim_hot == 1 ~ "hot",
+                              stim_hot == -1 ~ "cold")) %>% 
+  mutate(num_pks_log2 = log2(num_pks))
+
+compare_means(num_pks_log2 ~ EBS_type, data = d_pmc1, p.adjust.method = "fdr",
+              group.by = "JP_label_in")
+
+```
+
+```{r, fig.width=18, fig.height=6}
+
+d_pmc1$JP_label_in <- factor(d_pmc1$JP_label_in,
+                                 # in the order of lobes: frontal, temporal, parietal, occipital, subcortical
+                                 levels = anatomy_order)
+d_pmc1$EBS_type = factor(d_pmc1$EBS_type, levels = c('hot', 'cold'))
+
+p <- ggboxplot(d_pmc1, x = "JP_label_in", y = "num_pks",
+          color = "EBS_type", palette = c("#FC4E07", "#00AFBB"),# red, blue
+          add = "jitter", add.params = list(size=1.2, alpha=0.3),
+          size = 0.6, width = 0.5, #
+          outlier.size = 0.4
+         # facet.by = "JP_label_in", short.panel.labs = TRUE
+         ) +
+  theme(axis.text.x = element_text(angle = 45, hjust=0.8, vjust=0.8),
+        text = element_text(size = 14))+
+  scale_y_continuous(trans='log2') + labs(y = 'Number of peaks', x = 'Anatomical labelling (JP_label)')
+# Use only p.format as label. Remove method name.
+p + stat_compare_means(aes(group = EBS_type, label = sprintf("p = %1.2f", as.numeric(..p.format..))))
+
+```
+
+#### Upstream pathways
+
+```{r number of peaks for pmc upstream}
+d_pmc2 <- d_act %>% filter(record_hot %in% c(1, -1)) %>% 
+  mutate(EBS_type = case_when(record_hot == 1 ~ "hot",
+                              record_hot == -1 ~ "cold")) %>% 
+  mutate(num_pks_log2 = log2(num_pks))
+
+compare_means(num_pks_log2 ~ EBS_type, data = d_pmc2, p.adjust.method = "fdr",
+              group.by = "JP_label_out")
+
+```
+
+```{r, fig.width=16, fig.height=6}
+
+d_pmc2$JP_label_out <- factor(d_pmc2$JP_label_out,
+                                 # in the order of lobes: frontal, temporal, parietal, occipital, subcortical
+                                 levels = anatomy_order)
+d_pmc2$EBS_type = factor(d_pmc2$EBS_type, levels = c('hot', 'cold'))
+
+p <- ggboxplot(d_pmc2, x = "JP_label_out", y = "num_pks",
+          color = "EBS_type", palette = c("#FC4E07", "#00AFBB"),# red, blue
+          add = "jitter", add.params = list(size=1.2, alpha=0.3),
+          size = 0.6, width = 0.5, #
+          outlier.size = 0.4
+         # facet.by = "JP_label_in", short.panel.labs = TRUE
+         ) +
+  theme(axis.text.x = element_text(angle = 45, hjust=0.8, vjust=0.8),
+        text = element_text(size = 14))+
+  scale_y_continuous(trans='log2') + labs(y = 'Number of peaks', x = 'Anatomical labelling (JP_label)')
+# Use only p.format as label. Remove method name.
+p + stat_compare_means(aes(group = EBS_type, label = sprintf("p = %1.2f", as.numeric(..p.format..))))
+
+```
+
+

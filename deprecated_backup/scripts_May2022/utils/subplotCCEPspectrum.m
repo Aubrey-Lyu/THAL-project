@@ -8,9 +8,9 @@ if nargin < 8
 nstep_y = 10;
 end
 
-imagesc(d); xlabel('time (ms)'); ylabel('Frequency')
+imagesc(d); xlabel('time (s)'); ylabel('Frequency')
 title(ttl)
-xticklabels = round(1000*time);
+xticklabels = time;
 xticks = 1:size(d, 2);
 
 yticklabels = freq;
@@ -34,7 +34,7 @@ for f = 1:length(freqBands)
     freq_diff = abs(freq_num - fbs(f));
     idx  = find(freq_diff == min(freq_diff));
     if idx <= size(d,1)
-    yline(idx,'--', band,'FontSize',10, 'Color', [0.5, 0.5, 0.5]);
+    yline(idx,'--', band,'FontSize',8);
     end
 end
  xline( find(abs(time)==(min(abs(time)))), ':', 'LineWidth',2)

@@ -16,7 +16,7 @@ if ~exist(plot_folder, 'dir'); mkdir(plot_folder);end
  if ~exist(fullfile(result_folder, 'SingleTXT'), 'dir')
         mkdir(fullfile(result_folder, 'SingleTXT')); end
 % load metaTable
-metaT = readtable('~/Dropbox/Stanford_Matters/data/THAL/CCEP/results/explore5_locked/table_CCEPnewpipOutput_wholebrain_anatomical_info_activationRedone2.csv');
+metaT = readtable('~/Dropbox/Stanford_Matters/data/THAL/CCEP/results/explore5_locked/table_CCEPnewpipOutput_wholebrain_anatomical_info_activationRedone.csv');
 %
 % load data
 load('~/Dropbox/Stanford_Matters/data/THAL/CCEP/results/explore5_locked/CCEP_all_flat_meanTr_cleaned.mat');%, 'CCEP_flat' each row corresponding to the metaT
@@ -32,7 +32,7 @@ goodChan(badChan) = 0;
 cd(fullfile(data_folder, 'spectCCEP'));
 
 tic
-for is = length(sblist)
+for is = 13:length(sblist)
 
     sb = sblist{is};
 
@@ -96,7 +96,7 @@ for is = length(sblist)
     Vrpc = reshape(rpc, size(rpc,1), []);
 
     %% save data
-    fname = sprintf('SpecReduceCollapse_%s.mat', sb);
+    fname = sprintf('SpecReduceCollapse_%s', sb);
     if ~exist(fullfile(result_folder, 'SingleTXT'), 'dir')
         mkdir(fullfile(result_folder, 'SingleTXT')); end
 
@@ -109,7 +109,7 @@ for is = length(sblist)
     T.Yeo7_out1 = YeoNetShort(T.Yeo7_out1);
     T.Yeo7_in1  = YeoNetShort(T.Yeo7_in1);
     T.JP_label_in(strcmpi(T.JP_label_in, 'INSULA/LFC')) = {'INSULAorLFC'};
-    T.JP_label_out(strcmpi(T.JP_label_out, 'INSULA/LFC')) = {'INSULAorLFC'};
+    T.JP_label_out(strcmpi(T.JP_label_in, 'INSULA/LFC')) = {'INSULAorLFC'};
 
     parfor i = 1:length(filteridx_metaT)
         labelname = sprintf('from%s-%s_to%s-%s_%dmm_act%d_%s_IDX%d.txt',...

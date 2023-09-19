@@ -32,7 +32,7 @@ if nargin < 6
 end
 %%
 freqSeg = [0.5 5; 5 8; 8 15; 15 30; 30 70; 70 256];
-timeSeg = [-30 10; 10 117; 117 283; 283 800];
+timeSeg = [-30 10; 10 117; 117 280; 280 800];
 
 % reduce on the frequency domain
 rdata0 = nan(sum(kfreq), length(time));

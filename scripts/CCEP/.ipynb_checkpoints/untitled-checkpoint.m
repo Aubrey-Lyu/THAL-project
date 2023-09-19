@@ -1,5 +1,5 @@
-% this script will reduce the dimension of the spectrum for UMAP learn
-% part2: will write single vector data, and category labels
+% this script will separate the subject-level spectCCEP file into single stim-pair file
+% for speeding up loading files in parallel
 
 home_dir = '/data/dian';
 addpath(genpath(fullfile(home_dir, 'Dropbox/scripts/external/cbrewer2/cbrewer2')));
@@ -9,10 +9,10 @@ addpath(genpath('~/scripts/Stanford/ThalamocoricalLoop-project'))
 addpath(fullfile(home_dir, 'Dropbox/scripts/Stanford/CECS_Pipeline_COPY/CECS_Pipeline/CCEP_pipeline/HFB plot/subfunctions'));
 
 data_folder = '~/Dropbox/Stanford_Matters/data/THAL/CCEP/results/explore5_locked';
-result_folder =  fullfile(data_folder, 'UMAP_learn');
+result_folder =  fullfile(data_folder, 'spectCCEP');
 if ~exist(result_folder,'dir'); mkdir(result_folder);end
-plot_folder = '~/Dropbox/Stanford_Matters/data/THAL/CCEP/Plots/explore5/render1-reduced';
-if ~exist(plot_folder, 'dir'); mkdir(plot_folder);end
+% plot_folder = '~/Dropbox/Stanford_Matters/data/THAL/CCEP/Plots/explore5/render2-reduced';
+% if ~exist(plot_folder, 'dir'); mkdir(plot_folder);end
  if ~exist(fullfile(result_folder, 'SingleTXT'), 'dir')
         mkdir(fullfile(result_folder, 'SingleTXT')); end
 % load metaTable
@@ -27,12 +27,13 @@ ttpIdx = find(contains(vars, 'pks_time'));
 peakTimeMat = table2array(metaT(:,ttpIdx));
 
 %filterIdx = load('~/Dropbox/Stanford_Matters/data/THAL/CCEP/results/explore3_new2Sbjs/CCEP_all_flat_meanTr_cleaned.mat', 'badChan');
+%badChan = badChan_new;
 goodChan = ones(size(metaT,1),1);
 goodChan(badChan) = 0;
 cd(fullfile(data_folder, 'spectCCEP'));
 
 tic
-for is = length(sblist)
+for is = 1:length(sblist)
 
     sb = sblist{is};
 
@@ -46,7 +47,7 @@ for is = length(sblist)
         ~ismember(metaT.JP_label_in, {'', 'empty', 'NAN', 'NA'}) & ...
         ~ismember(metaT.JP_label_out, {'', 'empty', 'NAN', 'NA'}))  ;
 
-    [filterIdx, preIdxsub, ~] = intersect(phase.idx_in_metaT, prefilterIdx);
+    [filterIdx, preIdxsub, ~] = intersect(phase.idx_in_metaT, prefilterIdx, 'stable');
 
     subT = metaT(filterIdx,:);
 
@@ -56,11 +57,20 @@ for is = length(sblist)
     filteridx_metaT = filterIdx;
 
     %% step 2: transform data to get near-normal distribution
-    % flip phase based on CCEP waveforms
     toflip=[];
-    load(fullfile(data_folder, 'spectCCEP',['flipCCEP_' sb '.mat']), 'toflip')
-    phaseflipped = ...
-        flipPhase(powerDat, [], [], toflip);
+       
+       % if ~exist(['flipCCEP_' sb '.mat'], 'file')
+            [phaseflipped, toflip] = ...
+            flipPhase(phaseDat, zccep_clean(filterIdx,:), peakTimeMat(filterIdx,:), toflip);
+            %======================================
+            save(['flipCCEP_' sb '.mat'], 'toflip');
+            %======================================
+       % else
+          %  load(['flipCCEP_' sb '.mat'], 'toflip')
+           % phaseflipped = ...
+          %  flipPhase(phaseDat, [], [], toflip);
+        %end
+
     % log transform to power
     pw = log10(abs(powerDat));
     % use sign flipped phase
@@ -68,40 +78,7 @@ for is = length(sblist)
     % sqrt transform to itpc
     pc = sqrt(itpcDat);
 
-    %% step 3: reduce spectrum dimension and z-score it (highlight features)
-    freqs = power.freqs;
-    times = power.time;
-
-    freq_seg = [2, 2, 2, 2, 2, 1];
-    time_seg = [5 25 20 15];
-    freq_seg2 = [2, 2, 2, 2, 2, 0]; % phase coherence doesn't have the highest freq
-
-    rpw = nan(length(filteridx_metaT), sum(freq_seg), sum(time_seg));
-    rph = rpw;
-    rpc = nan(length(filteridx_metaT), sum(freq_seg2), sum(time_seg));
-
-    parfor i = 1:length(filteridx_metaT)
-        rpw(i,:,:) = reduceSpectrum(squeeze(pw(i,:,:))', ...
-            freqs, times*1000, freq_seg, time_seg);
-        rph(i,:,:) = reduceSpectrum(squeeze(ph(i,:,:))', ...
-            freqs, times*1000, freq_seg, time_seg);
-        rpc(i,:,:) = reduceSpectrum(squeeze(pc(i,:,:))', ...
-            freqs, times*1000, freq_seg2, time_seg);
-    end % ~2s
-
-
-    %% step 4: collapse data to single vector
-    Vrpw = reshape(rpw, size(rpw,1), []);
-    Vrph = reshape(rph, size(rph,1), []);
-    Vrpc = reshape(rpc, size(rpc,1), []);
-
-    %% save data
-    fname = sprintf('SpecReduceCollapse_%s.mat', sb);
-    if ~exist(fullfile(result_folder, 'SingleTXT'), 'dir')
-        mkdir(fullfile(result_folder, 'SingleTXT')); end
-
-    save(fullfile(result_folder, fname), 'filteridx_metaT', 'Vrpw', 'Vrph', 'Vrpc', '-v7');
-
+    
     %% save data in other formats
     col_idx = ismember(vars,...
         {'aSubID','JP_label_out','JP_label_in', 'Yeo7_out1', 'Yeo7_in1','eudDist','activated'});
@@ -118,9 +95,9 @@ for is = length(sblist)
             round(T.eudDist(i)), T.activated(i), ...
             T.aSubID{i}(1:3), filteridx_metaT(i)); %#ok<PFBNS>
         % write text file
-        writematrix(Vrpw(i,:), fullfile(result_folder, 'SingleTXT' , ['vrpw_' labelname]),'Delimiter','tab')
-        writematrix(Vrph(i,:), fullfile(result_folder, 'SingleTXT' , ['vrph_' labelname]),'Delimiter','tab')
-        writematrix(Vrpc(i,:), fullfile(result_folder, 'SingleTXT' , ['vrpc_' labelname]),'Delimiter','tab')
+        writematrix(Vrpw(i,:), fullfile(result_folder, 'SingleTXT' , ['vpw_' labelname]),'Delimiter','tab')
+        writematrix(Vrph(i,:), fullfile(result_folder, 'SingleTXT' , ['vph_' labelname]),'Delimiter','tab')
+        writematrix(Vrpc(i,:), fullfile(result_folder, 'SingleTXT' , ['vpc_' labelname]),'Delimiter','tab')
     end
 
 end % ~ 70s per round

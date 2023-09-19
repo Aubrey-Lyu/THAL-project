@@ -9,14 +9,14 @@ addpath(genpath('~/scripts/Stanford/ThalamocoricalLoop-project'))
 addpath(fullfile(home_dir, 'Dropbox/scripts/Stanford/CECS_Pipeline_COPY/CECS_Pipeline/CCEP_pipeline/HFB plot/subfunctions'));
 
 data_folder = '~/Dropbox/Stanford_Matters/data/THAL/CCEP/results/explore5_locked';
-result_folder =  fullfile(data_folder, 'UMAP_learn');
+result_folder =  fullfile(data_folder, 'UMAP_learn', 'resample2');
 if ~exist(result_folder,'dir'); mkdir(result_folder);end
-plot_folder = '~/Dropbox/Stanford_Matters/data/THAL/CCEP/Plots/explore5/render1-reduced';
-if ~exist(plot_folder, 'dir'); mkdir(plot_folder);end
+% plot_folder = '~/Dropbox/Stanford_Matters/data/THAL/CCEP/Plots/explore5/render2-reduced';
+% if ~exist(plot_folder, 'dir'); mkdir(plot_folder);end
  if ~exist(fullfile(result_folder, 'SingleTXT'), 'dir')
         mkdir(fullfile(result_folder, 'SingleTXT')); end
 % load metaTable
-metaT = readtable('~/Dropbox/Stanford_Matters/data/THAL/CCEP/results/explore5_locked/table_CCEPnewpipOutput_wholebrain_anatomical_info_activationRedone2.csv');
+metaT = readtable('~/Dropbox/Stanford_Matters/data/THAL/CCEP/results/explore5_locked/table_CCEPnewpipOutput_wholebrain_anatomical_info_activationRedone.csv');
 %
 % load data
 load('~/Dropbox/Stanford_Matters/data/THAL/CCEP/results/explore5_locked/CCEP_all_flat_meanTr_cleaned.mat');%, 'CCEP_flat' each row corresponding to the metaT
@@ -32,7 +32,7 @@ goodChan(badChan) = 0;
 cd(fullfile(data_folder, 'spectCCEP'));
 
 tic
-for is = length(sblist)
+for is = 1:length(sblist)
 
     sb = sblist{is};
 
@@ -71,22 +71,24 @@ for is = length(sblist)
     %% step 3: reduce spectrum dimension and z-score it (highlight features)
     freqs = power.freqs;
     times = power.time;
+  % TO CREATE BALANCED DATAPOINTS IN TWO DIMENSIONS
+%   freqSeg = [0.5 5; 5 8; 8 15; 15 30; 30 70; 70 256];
+% timeSeg = [-30 10; 10 117; 117 290; 282 800]; ms
+    K_freq_seg = [4, 4, 4, 4, 4, 3];
+    K_time_seg = [5 20 10 10];
+    K_freq_seg2 = [4, 4, 4, 4, 4, 0]; % phase coherence doesn't have the highest freq
 
-    freq_seg = [2, 2, 2, 2, 2, 1];
-    time_seg = [5 25 20 15];
-    freq_seg2 = [2, 2, 2, 2, 2, 0]; % phase coherence doesn't have the highest freq
-
-    rpw = nan(length(filteridx_metaT), sum(freq_seg), sum(time_seg));
+    rpw = nan(length(filteridx_metaT), sum(K_freq_seg), sum(K_time_seg));
     rph = rpw;
-    rpc = nan(length(filteridx_metaT), sum(freq_seg2), sum(time_seg));
+    rpc = nan(length(filteridx_metaT), sum(K_freq_seg2), sum(K_time_seg));
 
     parfor i = 1:length(filteridx_metaT)
         rpw(i,:,:) = reduceSpectrum(squeeze(pw(i,:,:))', ...
-            freqs, times*1000, freq_seg, time_seg);
+            freqs, times*1000, K_freq_seg, K_time_seg);
         rph(i,:,:) = reduceSpectrum(squeeze(ph(i,:,:))', ...
-            freqs, times*1000, freq_seg, time_seg);
+            freqs, times*1000, K_freq_seg, K_time_seg);
         rpc(i,:,:) = reduceSpectrum(squeeze(pc(i,:,:))', ...
-            freqs, times*1000, freq_seg2, time_seg);
+            freqs, times*1000, K_freq_seg2, K_time_seg);
     end % ~2s
 
 
@@ -96,7 +98,7 @@ for is = length(sblist)
     Vrpc = reshape(rpc, size(rpc,1), []);
 
     %% save data
-    fname = sprintf('SpecReduceCollapse_%s.mat', sb);
+    fname = sprintf('SpecReduceCollapse_%s', sb);
     if ~exist(fullfile(result_folder, 'SingleTXT'), 'dir')
         mkdir(fullfile(result_folder, 'SingleTXT')); end
 
